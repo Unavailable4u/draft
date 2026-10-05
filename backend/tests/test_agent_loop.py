@@ -78,3 +78,14 @@ def test_loop_detector(tmp_path):
     r = run_task("loop", llm, ledger_dir=str(tmp_path))
     assert r["status"] == "halted:loop_detected"
     assert leaked() == []
+
+
+class TextLLM(FakeLLM):
+    def chat(self, messages, tools=None):
+        return NS(content="all done", tool_calls=None)
+
+
+def test_text_answer_counts_as_finished(tmp_path):
+    r = run_task("x", TextLLM([]), ledger_dir=str(tmp_path))
+    assert r["status"] == "finished" and r["summary"] == "all done"
+    assert leaked() == []
