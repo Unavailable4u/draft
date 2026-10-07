@@ -11,6 +11,39 @@ def _hash(body: dict) -> str:
     return hashlib.sha256(_canon(body).encode()).hexdigest()
 
 
+def verify_events(events: list[dict]) -> tuple[bool, str]:
+    prev = GENESIS
+    for i, ev in enumerate(events):
+        body = {k: v for k, v in ev.items() if k != "hash"}
+        if ev.get("id") != i:
+            return False, f"event {i}: bad id (reordered or deleted)"
+        if body.get("prev_hash") != prev:
+            return False, f"event {i}: chain broken"
+        if _hash(body) != ev.get("hash"):
+            return False, f"event {i}: content tampered"
+        prev = ev["hash"]
+    return True, f"{len(events)} events verified"
+
+
+def read_events(path: str) -> tuple[list[dict], str | None]:
+    """Parse a ledger file. A torn *final* line (writer mid-append) is ignored;
+    an unparseable line anywhere else is returned as an error, never skipped."""
+    with open(path) as f:
+        lines = [ln for ln in f.read().split("\n") if ln.strip()]
+    events: list[dict] = []
+    for i, ln in enumerate(lines):
+        try:
+            ev = json.loads(ln)
+            if not isinstance(ev, dict):
+                raise ValueError("not an object")
+            events.append(ev)
+        except ValueError:
+            if i == len(lines) - 1:
+                break
+            return events, f"line {i}: unparseable"
+    return events, None
+
+
 class Ledger:
     def __init__(self, task_id: str, path: str | None = None):
         self.task_id = task_id
@@ -39,14 +72,4 @@ class Ledger:
         return ev
 
     def verify(self) -> tuple[bool, str]:
-        prev = GENESIS
-        for i, ev in enumerate(self.events):
-            body = {k: v for k, v in ev.items() if k != "hash"}
-            if ev["id"] != i:
-                return False, f"event {i}: bad id (reordered or deleted)"
-            if body["prev_hash"] != prev:
-                return False, f"event {i}: chain broken"
-            if _hash(body) != ev["hash"]:
-                return False, f"event {i}: content tampered"
-            prev = ev["hash"]
-        return True, f"{len(self.events)} events verified"
+        return verify_events(self.events)

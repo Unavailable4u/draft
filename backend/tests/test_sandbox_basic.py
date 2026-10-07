@@ -70,3 +70,25 @@ def test_rm_rf_wipes_workspace_but_not_system():
     assert r.stdout.split()[0] == "0"      # workspace really was wiped
     assert "usr_exists" in r.stdout        # read-only system survived
     assert host_intact()
+
+
+def test_workspace_allows_shared_objects_but_tmp_does_not():
+    """Compiled wheels (numpy, pandas, charset_normalizer...) live in /workspace/pkgs and
+    need to be mmap'd executable; /tmp must stay noexec."""
+    sb = Sandbox()
+    try:
+        mounts = sb.exec("cat /proc/mounts").stdout.splitlines()
+        ws = next(m for m in mounts if " /workspace " in m)
+        tmp = next(m for m in mounts if " /tmp " in m)
+        assert "noexec" not in ws and "noexec" in tmp, (ws, tmp)
+        script = (
+            "import ctypes, shutil\n"
+            "ctypes.CDLL('libz.so.1')\n"
+            "src = next(l.split()[-1] for l in open('/proc/self/maps') if 'libz.so' in l)\n"
+            "shutil.copy(src, '/workspace/libz_copy.so')\n"
+            "ctypes.CDLL('/workspace/libz_copy.so')\n"
+            "print('loaded')\n")
+        r = sb.exec(f"python3 - <<'PY'\n{script}PY")
+        assert r.exit_code == 0 and "loaded" in r.stdout, r.stderr
+    finally:
+        sb.destroy()

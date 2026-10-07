@@ -4,7 +4,15 @@ from dataclasses import dataclass
 
 import docker
 
-_client = docker.from_env()
+_client_cache = None
+
+
+def _client():
+    """Created on first use so importing this module never needs a Docker daemon."""
+    global _client_cache
+    if _client_cache is None:
+        _client_cache = docker.from_env()
+    return _client_cache
 
 
 @dataclass
@@ -25,7 +33,7 @@ class Sandbox:
             env.update(egress.proxy_env())
         else:
             net["network_mode"] = "none"
-        self.container = _client.containers.run(
+        self.container = _client().containers.run(
             image,
             command="sleep infinity",
             name=self.name,
@@ -41,7 +49,9 @@ class Sandbox:
             environment=env,
             tmpfs={
                 "/tmp": f"rw,noexec,nosuid,size={workspace_mb}m",
-                "/workspace": f"rw,nosuid,size={workspace_mb}m,uid=65534,gid=65534,mode=0755",
+                # exec is explicit: Docker defaults tmpfs to noexec, which breaks compiled wheels
+                # (numpy, pandas, ...) installed under /workspace. /tmp stays noexec.
+                "/workspace": f"rw,exec,nosuid,size={workspace_mb}m,uid=65534,gid=65534,mode=0755",
             },
             working_dir="/workspace",
             labels={"airlock": "sandbox"},
