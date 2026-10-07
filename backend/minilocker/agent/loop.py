@@ -6,9 +6,9 @@ import time
 import uuid
 from collections import Counter
 
-from airlock.ledger.chain import Ledger
-from airlock.policy.engine import Budgets
-from airlock.sandbox.docker_provider import Sandbox
+from minilocker.ledger.chain import Ledger
+from minilocker.policy.engine import Budgets
+from minilocker.sandbox.docker_provider import Sandbox
 
 SYSTEM = (
     "You are an agent working inside a locked-down Linux sandbox (python3 available; the network is "
@@ -221,6 +221,11 @@ def run_task(task, llm, max_steps=12, max_tokens=40000, exec_timeout=30,
                     break
             if done:
                 break
+    except Exception as e:
+        # Without this, the finally block below would stamp a crash with the default
+        # status ("halted:max_steps"): a false statement in a tamper-evident ledger.
+        status = f"error:{type(e).__name__}"
+        raise
     finally:
         if egress is not None:
             time.sleep(0.5)

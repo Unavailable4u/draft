@@ -5,9 +5,9 @@ import time
 import docker
 from docker.errors import NotFound
 
-INTERNAL = "airlock-internal"   # no route to the internet
-EXTERNAL = "airlock-egress"     # only the proxy lives here
-PROXY = "airlock-egress-proxy"
+INTERNAL = "minilocker-internal"   # no route to the internet
+EXTERNAL = "minilocker-egress"     # only the proxy lives here
+PROXY = "minilocker-egress-proxy"
 ALIAS = "egress-proxy"
 PORT = 3128
 
@@ -26,7 +26,7 @@ class EgressManager:
             self.client.networks.get(name)
         except NotFound:
             self.client.networks.create(name, driver="bridge", internal=internal,
-                                        labels={"airlock": "net"})
+                                        labels={"minilocker": "net"})
 
     def start(self):
         self.stop()
@@ -40,7 +40,7 @@ class EgressManager:
             environment={"ALLOWED_HOSTS": ",".join(self.allowed)},
             user="65534:65534", read_only=True, cap_drop=["ALL"],
             security_opt=["no-new-privileges"], pids_limit=64, mem_limit="128m",
-            labels={"airlock": "proxy"})
+            labels={"minilocker": "proxy"})
         self.client.networks.get(INTERNAL).connect(self.container, aliases=[ALIAS])
         deadline = time.time() + 15
         while time.time() < deadline:

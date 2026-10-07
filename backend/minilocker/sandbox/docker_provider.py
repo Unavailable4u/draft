@@ -25,7 +25,7 @@ class ExecResult:
 
 class Sandbox:
     def __init__(self, image="python:3.12-slim", workspace_mb=64, egress=None):
-        self.name = f"airlock-{uuid.uuid4().hex[:8]}"
+        self.name = f"minilocker-{uuid.uuid4().hex[:8]}"
         env = {"HOME": "/tmp"}
         net = {}
         if egress is not None:
@@ -54,7 +54,7 @@ class Sandbox:
                 "/workspace": f"rw,exec,nosuid,size={workspace_mb}m,uid=65534,gid=65534,mode=0755",
             },
             working_dir="/workspace",
-            labels={"airlock": "sandbox"},
+            labels={"minilocker": "sandbox"},
             **net,
         )
         self.dead = False

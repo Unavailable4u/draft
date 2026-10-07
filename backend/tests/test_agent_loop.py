@@ -4,9 +4,9 @@ from types import SimpleNamespace as NS
 
 import docker
 
-from airlock.agent.loop import run_task
+from minilocker.agent.loop import run_task
 
-CANARY = os.path.expanduser("~/airlock_host_canary.txt")
+CANARY = os.path.expanduser("~/minilocker_host_canary.txt")
 
 
 def call(name, **args):
@@ -27,7 +27,7 @@ class FakeLLM:
 
 
 def leaked():
-    return docker.from_env().containers.list(all=True, filters={"label": "airlock=sandbox"})
+    return docker.from_env().containers.list(all=True, filters={"label": "minilocker=sandbox"})
 
 
 def types(events):

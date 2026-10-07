@@ -1,8 +1,12 @@
 import os
+from types import SimpleNamespace as NS
 
-from airlock.agent.loop import run_task
-from airlock.policy.approvals import ApprovalGate
-from airlock.policy.engine import Budgets, PolicyEngine
+import pytest
+
+from minilocker.agent.loop import run_task
+from minilocker.policy.approvals import ApprovalGate
+from minilocker.policy.engine import Budgets, PolicyEngine
+import minilocker.agent.loop as loop_mod
 from test_agent_loop import CANARY, FakeLLM, call, leaked
 
 
@@ -80,3 +84,35 @@ def test_repeated_denials_halt_task(tmp_path):
     r = run_task("t", FakeLLM([[call("run_shell", cmd=c)] for c in cmds]), ledger_dir=str(tmp_path),
                  policy=PolicyEngine("strict", Budgets(max_denials=2)))
     assert r["status"] == "halted:policy_denials" and r["denials"] == 2 and leaked() == []
+
+
+class ExplodingLLM(FakeLLM):
+    """Answers its script, then fails like a provider error would."""
+    def chat(self, messages, tools=None):
+        if not self.script:
+            raise RuntimeError("provider exploded")
+        return super().chat(messages, tools)
+
+
+class StubSandbox:
+    name, ip = "stub", "0.0.0.0"
+
+    def __init__(self, egress=None):
+        pass
+
+    def exec(self, cmd, timeout_s):
+        return NS(exit_code=0, stdout="hi", stderr="", timed_out=False)
+
+    def destroy(self):
+        pass
+
+
+def test_crash_is_recorded_as_error_not_max_steps(tmp_path, monkeypatch):
+    """No Docker needed. A mid-task exception must not be logged as a budget halt."""
+    monkeypatch.setattr(loop_mod, "Sandbox", StubSandbox)
+    evs = []
+    with pytest.raises(RuntimeError):
+        run_task("t", ExplodingLLM([[call("run_shell", cmd="echo hi")]]), ledger_dir=str(tmp_path),
+                 on_event=evs.append, policy=PolicyEngine("strict"))
+    end = [e for e in evs if e["type"] == "task.end"][0]["payload"]
+    assert end["status"] == "error:RuntimeError"

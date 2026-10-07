@@ -9,9 +9,9 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
-from airlock.ledger.chain import read_events
-from airlock.policy.approvals import ApprovalGate
-from airlock.policy.engine import PolicyEngine
+from minilocker.ledger.chain import read_events
+from minilocker.policy.approvals import ApprovalGate
+from minilocker.policy.engine import PolicyEngine
 
 TASK_ID_RE = re.compile(r"^[0-9a-f]{8}$")  # also what keeps ids out of path traversal
 _END = object()
@@ -77,7 +77,7 @@ class TaskManager:
         self._approvals: dict[str, dict] = {}   # approval id -> {task_id, state}
         self._lock = threading.Lock()
         self._active = 0
-        self._pool = ThreadPoolExecutor(max_workers=max_concurrent, thread_name_prefix="airlock-task")
+        self._pool = ThreadPoolExecutor(max_workers=max_concurrent, thread_name_prefix="minilocker-task")
         os.makedirs(ledger_dir, exist_ok=True)
 
     # ---- tasks -----------------------------------------------------------

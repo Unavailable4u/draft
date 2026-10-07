@@ -3,8 +3,8 @@ import time
 
 import pytest
 
-from airlock.policy.approvals import ApprovalGate
-from airlock.policy.engine import PolicyEngine, analyze_shell
+from minilocker.policy.approvals import ApprovalGate
+from minilocker.policy.engine import PolicyEngine, analyze_shell
 
 LOW = [
     "ls -la", "python3 a.py", "pip install --target /workspace/pkgs six",

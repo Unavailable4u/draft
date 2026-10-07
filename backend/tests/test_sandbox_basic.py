@@ -1,8 +1,8 @@
 import os
 import docker
-from airlock.sandbox.docker_provider import Sandbox
+from minilocker.sandbox.docker_provider import Sandbox
 
-CANARY = os.path.expanduser("~/airlock_host_canary.txt")
+CANARY = os.path.expanduser("~/minilocker_host_canary.txt")
 
 
 def setup_module():
@@ -46,7 +46,7 @@ def test_no_network():
 
 def test_no_leaked_containers():
     run("echo hi")
-    leaked = docker.from_env().containers.list(all=True, filters={"label": "airlock=sandbox"})
+    leaked = docker.from_env().containers.list(all=True, filters={"label": "minilocker=sandbox"})
     assert leaked == []
 
 

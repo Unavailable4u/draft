@@ -7,7 +7,7 @@ import html
 import json
 from collections import Counter
 
-from airlock.ledger.chain import verify_events
+from minilocker.ledger.chain import verify_events
 
 NOT_MEASURED = {"status": "not_measured"}
 

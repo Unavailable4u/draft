@@ -2,22 +2,22 @@ import json
 import os
 import sys
 
-from airlock.agent.loop import run_task
-from airlock.egress.manager import EgressManager
-from airlock.llm.client import LLMClient
-from airlock.policy.approvals import console_approver
-from airlock.policy.engine import PolicyEngine
+from minilocker.agent.loop import run_task
+from minilocker.egress.manager import EgressManager
+from minilocker.llm.client import LLMClient
+from minilocker.policy.approvals import console_approver
+from minilocker.policy.engine import PolicyEngine
 
 
 def main():
     if len(sys.argv) < 2:
-        sys.exit('usage: python -m airlock.cli "your task"   (AIRLOCK_PROFILE=strict|observe)')
+        sys.exit('usage: python -m minilocker.cli "your task"   (MINILOCKER_PROFILE=strict|observe)')
 
     def show(ev):
         print(f"[{ev['actor']}:{ev['type']}] {json.dumps(ev['payload'])[:260]}")
 
-    allow = os.environ.get("AIRLOCK_ALLOW", "pypi.org,files.pythonhosted.org").split(",")
-    policy = PolicyEngine(os.environ.get("AIRLOCK_PROFILE", "strict"))
+    allow = os.environ.get("MINILOCKER_ALLOW", "pypi.org,files.pythonhosted.org").split(",")
+    policy = PolicyEngine(os.environ.get("MINILOCKER_PROFILE", "strict"))
     egress = EgressManager(allow).start()
     try:
         res = run_task(" ".join(sys.argv[1:]), LLMClient(), on_event=show, egress=egress,

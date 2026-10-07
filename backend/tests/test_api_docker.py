@@ -2,8 +2,8 @@
 Needs a Docker daemon (same as the other sandbox tests); the LLM is scripted."""
 from fastapi.testclient import TestClient
 
-from airlock.agent.loop import run_task
-from airlock.api.app import create_app
+from minilocker.agent.loop import run_task
+from minilocker.api.app import create_app
 from test_agent_loop import FakeLLM, call, leaked
 
 

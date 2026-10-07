@@ -6,8 +6,8 @@ import time
 
 from fastapi.testclient import TestClient
 
-from airlock.api.app import create_app
-from airlock.ledger.chain import Ledger
+from minilocker.api.app import create_app
+from minilocker.ledger.chain import Ledger
 
 
 def fake_runner(task, llm, ledger_dir, egress, policy, approver, on_event, task_id, **_):
@@ -17,7 +17,7 @@ def fake_runner(task, llm, ledger_dir, egress, policy, approver, on_event, task_
         on_event(ledger.append(actor, type_, payload))
 
     log("user", "task.start", {"task": task, "profile": policy.profile.name})
-    log("sandbox", "sandbox.created", {"name": "airlock-x", "ip": ""})
+    log("sandbox", "sandbox.created", {"name": "minilocker-x", "ip": ""})
     log("egress", "egress.blocked", {"host": "evil.example", "reason": "not_allowlisted"})
     log("egress", "egress.allowed", {"host": "pypi.org"})
     log("egress", "egress.closed", {"host": "pypi.org", "bytes_up": 10, "bytes_down": 90})
@@ -31,7 +31,7 @@ def fake_runner(task, llm, ledger_dir, egress, policy, approver, on_event, task_
         status = "finished" if ok else "halted:policy_denials"
     if "slow" in task:
         time.sleep(0.5)
-    log("sandbox", "sandbox.destroyed", {"name": "airlock-x"})
+    log("sandbox", "sandbox.destroyed", {"name": "minilocker-x"})
     log("agent", "task.end", {"status": status, "steps": 1, "summary": "done"})
     ok, detail = ledger.verify()
     return {"task_id": task_id, "status": status, "ledger_verified": ok, "ledger": detail}

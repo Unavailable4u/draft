@@ -3,8 +3,13 @@ import random
 import sys
 import time
 
-from openai import (APIConnectionError, APITimeoutError, OpenAI,
-                    RateLimitError)
+from openai import (APIConnectionError, APITimeoutError, BadRequestError,
+                    OpenAI, RateLimitError)
+
+
+BAD_TOOL_CALL_RETRIES = 3
+RETRY_NUDGE = {"role": "user", "content": "Your last tool call had invalid JSON arguments and was "
+                                          "rejected. Call the tool again with valid JSON arguments."}
 
 
 class LLMClient:
@@ -27,6 +32,7 @@ class LLMClient:
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
+        bad_calls = 0
         for attempt in range(self.max_retries + 1):
             try:
                 r = self.client.chat.completions.create(**kwargs)
@@ -44,6 +50,15 @@ class LLMClient:
                 self._sleep_or_raise(attempt, e, wait)
             except (APIConnectionError, APITimeoutError) as e:
                 self._sleep_or_raise(attempt, e, None)
+            except BadRequestError as e:
+                # Some models (seen: gpt-oss on Groq) occasionally emit a malformed tool call
+                # and the provider rejects it with 400 tool_use_failed. Sampling is random, so
+                # retry with a nudge instead of crashing the task. Any other 400 is a real bug.
+                bad_calls += 1
+                if "tool_use_failed" not in str(e) or bad_calls > BAD_TOOL_CALL_RETRIES:
+                    raise
+                print(f"[llm] malformed tool call, retry {bad_calls}/{BAD_TOOL_CALL_RETRIES}", file=sys.stderr)
+                kwargs = {**kwargs, "messages": [*messages, RETRY_NUDGE]}   # nudge on the retry only
 
     def _sleep_or_raise(self, attempt, err, wait):
         if attempt >= self.max_retries:

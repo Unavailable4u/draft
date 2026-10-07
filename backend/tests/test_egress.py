@@ -3,10 +3,10 @@ import time
 
 import pytest
 
-from airlock.agent.loop import run_task
-from airlock.egress.manager import EgressManager
-from airlock.egress.proxy_server import host_allowed, is_public
-from airlock.sandbox.docker_provider import Sandbox
+from minilocker.agent.loop import run_task
+from minilocker.egress.manager import EgressManager
+from minilocker.egress.proxy_server import host_allowed, is_public
+from minilocker.sandbox.docker_provider import Sandbox
 from test_agent_loop import FakeLLM, call, leaked
 
 ALLOW = ["pypi.org", "files.pythonhosted.org"]

@@ -1,4 +1,4 @@
-from airlock.ledger.chain import Ledger
+from minilocker.ledger.chain import Ledger
 
 
 def make():

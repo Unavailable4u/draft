@@ -12,9 +12,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from airlock.api.tasks import TaskLimitError, TaskManager
-from airlock.ledger.chain import verify_events
-from airlock.ledger.report import build_report, render_html
+from minilocker.api.tasks import TaskLimitError, TaskManager
+from minilocker.ledger.chain import verify_events
+from minilocker.ledger.report import build_report, render_html
 
 HEARTBEAT_S = 15
 
@@ -29,18 +29,18 @@ class ApprovalRequest(BaseModel):
 
 
 def _default_runner():
-    from airlock.agent.loop import run_task
+    from minilocker.agent.loop import run_task
     return run_task
 
 
 def _default_llm_factory():
-    from airlock.llm.client import LLMClient
+    from minilocker.llm.client import LLMClient
     return LLMClient
 
 
 def _default_egress():
-    from airlock.egress.manager import EgressManager
-    allow = os.environ.get("AIRLOCK_ALLOW", "pypi.org,files.pythonhosted.org").split(",")
+    from minilocker.egress.manager import EgressManager
+    allow = os.environ.get("MINILOCKER_ALLOW", "pypi.org,files.pythonhosted.org").split(",")
     return EgressManager(allow).start()
 
 
@@ -48,10 +48,10 @@ def create_app(runner=None, llm_factory=None, egress_factory=None, ledger_dir=No
                max_concurrent=None, approval_timeout_s=None, api_token=None) -> FastAPI:
     """Everything environment-specific is injectable so the API can be tested
     without Docker or a real model."""
-    ledger_dir = ledger_dir or os.environ.get("AIRLOCK_LEDGER_DIR", "runs")
-    max_concurrent = max_concurrent or int(os.environ.get("AIRLOCK_MAX_TASKS", "2"))
-    approval_timeout_s = approval_timeout_s or float(os.environ.get("AIRLOCK_APPROVAL_TIMEOUT", "60"))
-    api_token = api_token if api_token is not None else os.environ.get("AIRLOCK_API_TOKEN", "")
+    ledger_dir = ledger_dir or os.environ.get("MINILOCKER_LEDGER_DIR", "runs")
+    max_concurrent = max_concurrent or int(os.environ.get("MINILOCKER_MAX_TASKS", "2"))
+    approval_timeout_s = approval_timeout_s or float(os.environ.get("MINILOCKER_APPROVAL_TIMEOUT", "60"))
+    api_token = api_token if api_token is not None else os.environ.get("MINILOCKER_API_TOKEN", "")
 
     @asynccontextmanager
     async def lifespan(app):
@@ -67,15 +67,15 @@ def create_app(runner=None, llm_factory=None, egress_factory=None, ledger_dir=No
             if egress is not None:
                 egress.stop()
 
-    app = FastAPI(title="Airlock control plane", lifespan=lifespan)
-    origins = [o for o in os.environ.get("AIRLOCK_CORS_ORIGINS", "http://localhost:5173").split(",") if o]
+    app = FastAPI(title="MiniLocker control plane", lifespan=lifespan)
+    origins = [o for o in os.environ.get("MINILOCKER_CORS_ORIGINS", "http://localhost:5173").split(",") if o]
     app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["GET", "POST"],
                        allow_headers=["Authorization", "Content-Type", "Last-Event-ID"])
     make_llm = llm_factory or _default_llm_factory()
 
     def auth(request: Request):
         # Optional shared-secret guard. POST /api/tasks spends LLM credits and runs
-        # code, so set AIRLOCK_API_TOKEN before exposing this on a public IP.
+        # code, so set MINILOCKER_API_TOKEN before exposing this on a public IP.
         if not api_token:
             return
         got = request.headers.get("authorization", "")

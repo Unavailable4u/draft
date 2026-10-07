@@ -2,8 +2,8 @@
 Uses a fake sandbox and fake egress manager, so no Docker is needed."""
 import time
 
-from airlock.agent.loop import run_task
-from airlock.sandbox.docker_provider import ExecResult
+from minilocker.agent.loop import run_task
+from minilocker.sandbox.docker_provider import ExecResult
 from test_agent_loop import FakeLLM, call
 
 
@@ -38,7 +38,7 @@ def test_egress_events_stream_during_exec(tmp_path, monkeypatch):
                          "host": "pypi.org", "port": 443, "method": "CONNECT"}]
             return []
 
-    monkeypatch.setattr("airlock.agent.loop.Sandbox", FakeSandbox)
+    monkeypatch.setattr("minilocker.agent.loop.Sandbox", FakeSandbox)
     seen = []
     llm = FakeLLM([[call("run_shell", cmd="slow")], [call("finish", summary="done")]])
     r = run_task("t", llm, ledger_dir=str(tmp_path), egress=FakeEgress(),
