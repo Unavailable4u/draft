@@ -16,8 +16,15 @@ class ExecResult:
 
 
 class Sandbox:
-    def __init__(self, image="python:3.12-slim", workspace_mb=64):
+    def __init__(self, image="python:3.12-slim", workspace_mb=64, egress=None):
         self.name = f"airlock-{uuid.uuid4().hex[:8]}"
+        env = {"HOME": "/tmp"}
+        net = {}
+        if egress is not None:
+            net["network"] = egress.internal_network
+            env.update(egress.proxy_env())
+        else:
+            net["network_mode"] = "none"
         self.container = _client.containers.run(
             image,
             command="sleep infinity",
@@ -31,24 +38,28 @@ class Sandbox:
             mem_limit="512m",
             memswap_limit="512m",
             nano_cpus=1_000_000_000,
-            network_mode="none",  # becomes the internal proxy network in Week 2
+            environment=env,
             tmpfs={
                 "/tmp": f"rw,noexec,nosuid,size={workspace_mb}m",
                 "/workspace": f"rw,nosuid,size={workspace_mb}m,uid=65534,gid=65534,mode=0755",
             },
             working_dir="/workspace",
             labels={"airlock": "sandbox"},
+            **net,
         )
         self.dead = False
+        self.ip = ""
+        if egress is not None:
+            self.container.reload()
+            self.ip = self.container.attrs["NetworkSettings"]["Networks"][
+                egress.internal_network]["IPAddress"]
 
     def exec(self, cmd: str, timeout_s: int = 30) -> ExecResult:
         box = {}
 
         def work():
             try:
-                code, (out, err) = self.container.exec_run(
-                    ["sh", "-c", cmd], demux=True
-                )
+                code, (out, err) = self.container.exec_run(["sh", "-c", cmd], demux=True)
                 box["r"] = (code, out or b"", err or b"")
             except Exception as e:  # container killed mid-exec
                 box["err"] = e
@@ -57,8 +68,7 @@ class Sandbox:
         t.start()
         t.join(timeout_s)
         if t.is_alive():
-            # hard deadline: kill the whole container, not just the process
-            self.container.kill()
+            self.container.kill()  # hard deadline: kill the container, not just the process
             self.dead = True
             t.join(5)
             return ExecResult(137, "", "", True)

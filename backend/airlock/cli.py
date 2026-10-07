@@ -1,7 +1,9 @@
 import json
+import os
 import sys
 
 from airlock.agent.loop import run_task
+from airlock.egress.manager import EgressManager
 from airlock.llm.client import LLMClient
 
 
@@ -12,7 +14,12 @@ def main():
     def show(ev):
         print(f"[{ev['actor']}:{ev['type']}] {json.dumps(ev['payload'])[:260]}")
 
-    res = run_task(" ".join(sys.argv[1:]), LLMClient(), on_event=show)
+    allow = os.environ.get("AIRLOCK_ALLOW", "pypi.org,files.pythonhosted.org").split(",")
+    egress = EgressManager(allow).start()
+    try:
+        res = run_task(" ".join(sys.argv[1:]), LLMClient(), on_event=show, egress=egress)
+    finally:
+        egress.stop()
     print(json.dumps(res, indent=2))
 
 
