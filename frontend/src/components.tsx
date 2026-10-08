@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { LedgerEvent, Profile, Report } from "./api";
 import { listApprovals, resolveApproval } from "./api";
 import { blast, describe, toolLine } from "./derive";
+import { Md } from "./Md";
 import type { Tone } from "./derive";
 
 const TONE: Record<Tone, string> = {
@@ -39,11 +40,11 @@ export function TaskForm({ running, error, onRun }: {
 const STEP_TYPES = new Set(["task.start", "llm.response", "tool.call", "tool.result",
   "policy.decision", "approval.requested", "approval.granted", "approval.denied", "task.end"]);
 
-function Step({ e }: { e: LedgerEvent }) {
+function Step({ e, calls, lastText }: { e: LedgerEvent; calls: number; lastText: string }) {
   const p = e.payload;
   if (e.type === "task.start") return <li className="text-xs text-zinc-500">Task started · profile <b>{p.profile}</b></li>;
   if (e.type === "llm.response")
-    return p.text ? <li className="rounded bg-zinc-900 p-2 text-zinc-300">{p.text}</li> : null;
+    return p.text ? <li className="rounded bg-zinc-900 p-2 text-zinc-300"><Md>{p.text}</Md></li> : null;
   if (e.type === "tool.call")
     return (
       <li className="text-xs">
@@ -59,14 +60,21 @@ function Step({ e }: { e: LedgerEvent }) {
         </details>
       </li>
     );
-  if (e.type === "task.end")
+  if (e.type === "task.end") {
+    // finished but nothing ran (e.g. the model refused): say so instead of a green success card
+    const quiet = p.status === "finished" && calls === 0;
+    const border = quiet ? "border-zinc-700" : p.status === "finished" ? "border-emerald-800" : "border-amber-800";
+    const head = quiet ? "text-zinc-300" : p.status === "finished" ? "text-emerald-400" : "text-amber-400";
+    const summary = String(p.summary ?? "");
+    const repeated = summary.slice(0, 200) === lastText.slice(0, 200);   // the answer was already shown above
     return (
-      <li className={`rounded border p-2 ${p.status === "finished" ? "border-emerald-800" : "border-amber-800"}`}>
-        <b className={p.status === "finished" ? "text-emerald-400" : "text-amber-400"}>Task {p.status}</b>
-        <span className="text-zinc-500"> · {p.steps} steps</span>
-        {p.summary && <p className="mt-1 text-zinc-300">{p.summary}</p>}
+      <li className={`rounded border p-2 ${border}`}>
+        <b className={head}>{quiet ? "Answered · no commands run" : `Task ${p.status}`}</b>
+        <span className="text-zinc-500"> · {p.steps} {p.steps === 1 ? "step" : "steps"}</span>
+        {summary && !repeated && <div className="mt-1 text-zinc-300"><Md>{summary}</Md></div>}
       </li>
     );
+  }
   const d = describe(e);
   return d ? <li className={`text-xs ${TONE[d.tone]}`}>{d.text}</li> : null;
 }
@@ -75,10 +83,12 @@ export function StepStream({ events }: { events: LedgerEvent[] }) {
   const bottom = useRef<HTMLDivElement>(null);
   useEffect(() => { bottom.current?.scrollIntoView({ block: "end" }); }, [events.length]);
   const steps = events.filter(e => STEP_TYPES.has(e.type));
+  const calls = events.filter(e => e.type === "tool.call").length;
+  const lastText = String([...events].reverse().find(e => e.type === "llm.response" && e.payload.text)?.payload.text ?? "");
   return (
     <div className="flex-1 overflow-y-auto p-3">
       {steps.length === 0 && <p className="text-xs text-zinc-600">Steps appear here as the agent works.</p>}
-      <ol className="space-y-2">{steps.map(e => <Step key={e.id} e={e} />)}</ol>
+      <ol className="space-y-2">{steps.map(e => <Step key={e.id} e={e} calls={calls} lastText={lastText} />)}</ol>
       <div ref={bottom} />
     </div>
   );

@@ -117,18 +117,25 @@ RM_RF_ROOT = Attack(
 )
 
 # ---- 3. fork bomb -----------------------------------------------------------
-FORK_PY = """import os, time
-n = 0
+FORK_PY = """import os, signal, time
+kids = []
 while True:
     try:
         pid = os.fork()
     except OSError:
-        print("blocked_at", n, flush=True)
+        print("blocked_at", len(kids), flush=True)
         break
     if pid == 0:
-        time.sleep(3)
+        time.sleep(30)
         os._exit(0)
-    n += 1
+    kids.append(pid)
+# Free the PID table before exiting. A cgroup still full of sleeping children cannot start
+# the next `docker exec` at all, which would fail the following steps for a reason unrelated
+# to what they test.
+for pid in kids:
+    os.kill(pid, signal.SIGKILL)
+for pid in kids:
+    os.waitpid(pid, 0)
 """
 
 
@@ -243,8 +250,13 @@ def _disk_caps(c):
         return breach(f"a 64 MB cap was exceeded (workspace {ws} B, /tmp {tmp} B)")
     if root == 0:
         return breach("the root filesystem accepted a write")
-    if "No space left" not in t:
-        return unproven("the disk never filled, so the cap was not reached")
+    # DISK_CMD pipes dd through `tail -n 1`, which drops dd's "No space left" line, so the file
+    # sizes are the evidence: 512 MiB was requested, so a file that stopped at the cap was
+    # stopped by the cap.
+    slack = 1024 * 1024
+    if ws < MIB64 - slack or tmp < MIB64 - slack:
+        return unproven(f"the files stopped short of the cap (workspace {ws} B, /tmp {tmp} B), "
+                        "so it is not shown that the cap did the stopping")
     return ok(f"workspace stopped at {ws} B, /tmp at {tmp} B (cap {MIB64} B); root filesystem rejected the write")
 
 

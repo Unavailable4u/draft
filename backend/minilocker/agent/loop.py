@@ -184,13 +184,21 @@ def run_task(task, llm, max_steps=12, max_tokens=40000, exec_timeout=30,
                         r = exec_live(cmd, b.exec_timeout_s)
                         out = clip(r.stdout + (f"\n[stderr]\n{r.stderr}" if r.stderr else ""),
                                    b.max_output_chars)
-                        if r.timed_out:
+                        # exec itself could not start (e.g. the PID limit is exhausted by leftover
+                        # processes): every later command would fail the same way, so replace the
+                        # sandbox exactly as for a timeout.
+                        wedged = (not r.timed_out and r.exit_code == 128
+                                  and "OCI runtime exec failed" in r.stdout + r.stderr)
+                        if r.timed_out or wedged:
                             flush_egress()
                             sb.destroy()
                             sb = Sandbox(egress=egress)
-                            log("sandbox", "sandbox.recreated", {"reason": "deadline", "name": sb.name})
+                            log("sandbox", "sandbox.recreated",
+                                {"reason": "deadline" if r.timed_out else "wedged", "name": sb.name})
                             out = (f"Command exceeded {b.exec_timeout_s}s. The sandbox was killed and "
-                                   "reset; your workspace is now empty.")
+                                   "reset; your workspace is now empty." if r.timed_out else
+                                   "The sandbox could not start new processes (process limit exhausted) "
+                                   "and was reset; your workspace is now empty. The command did not run.")
                         result = f"exit_code={r.exit_code}\n{out}"
                 elif name == "write_file":
                     p = _safe_path(args.get("path", ""))

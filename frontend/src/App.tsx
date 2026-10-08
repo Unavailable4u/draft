@@ -3,6 +3,7 @@ import { getToken, setToken } from "./api";
 import { AttackLab } from "./AttackLab";
 import { ApprovalModal, BlastPanel, StepStream, Stub, TaskForm } from "./components";
 import { ReportScreen } from "./Report";
+import { SessionsScreen } from "./Sessions";
 import { TerminalView } from "./Terminal";
 import { useAttacks } from "./useAttacks";
 import { useTask } from "./useTask";
@@ -16,7 +17,7 @@ const SCREENS: { id: Screen; label: string; needs?: string }[] = [
   { id: "timeline", label: "Timeline", needs: "Needs snapshots and POST /api/tasks/{id}/rewind (Week 4)." },
   { id: "attacks", label: "Attack Lab" },
   { id: "report", label: "Report" },
-  { id: "sessions", label: "Sessions", needs: "Needs a GET /api/tasks list endpoint." },
+  { id: "sessions", label: "Sessions" },
   { id: "infra", label: "Infra", needs: "Needs an infra/status endpoint (VM, running sandboxes, resource use)." },
 ];
 
@@ -80,6 +81,8 @@ export default function App() {
       {screen === "workspace" ? <Workspace t={t} />
         : screen === "attacks" ? <AttackLab lab={lab} onOpenReport={id => { setReportOverride(id); setScreen("report"); }} />
         : screen === "report" ? <ReportScreen taskId={reportId} done={reportOverride !== null || (t.taskId !== null && !t.running)} />
+        : screen === "sessions" ? <SessionsScreen onOpen={id => { t.attach(id); setScreen("workspace"); }}
+            onReport={id => { setReportOverride(id); setScreen("report"); }} />
         : <Stub title={cur.label} needs={cur.needs!} />}
       {t.approval && t.taskId && <ApprovalModal key={t.approval.payload.id} ev={t.approval} taskId={t.taskId} />}
     </div>

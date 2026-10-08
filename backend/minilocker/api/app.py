@@ -115,6 +115,10 @@ def create_app(runner=None, llm_factory=None, egress_factory=None, ledger_dir=No
                 "events_url": f"/api/tasks/{state.task_id}/events",
                 "report_url": f"/api/tasks/{state.task_id}/report"}
 
+    @app.get("/api/tasks", dependencies=[Depends(auth)])
+    def list_tasks(limit: int = Query(50, ge=1, le=200), m: TaskManager = Depends(mgr)):
+        return {"tasks": m.list_summaries(limit)}
+
     @app.get("/api/tasks/{task_id}", dependencies=[Depends(auth)])
     def get_task(task_id: str, m: TaskManager = Depends(mgr)):
         st = m.get(task_id)
@@ -145,7 +149,9 @@ def create_app(runner=None, llm_factory=None, egress_factory=None, ledger_dir=No
             async def replay():
                 for ev in events:
                     yield _frame(ev)
-                yield _end_frame({"status": "finished", "replayed": True})
+                end = next((e for e in reversed(loaded[0]) if e["type"] == "task.end"), None)
+                yield _end_frame({"status": ((end or {}).get("payload") or {}).get("status", "incomplete"),
+                                  "replayed": True})
             return _sse(replay())
 
         async def live():

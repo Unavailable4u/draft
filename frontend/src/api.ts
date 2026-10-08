@@ -12,6 +12,11 @@ export type Report = {
   dimensions: Record<string, Dimension>;
 };
 export type Verification = { task_id: string; verified: boolean; detail: string; events: number; head_hash: string | null };
+export type TaskSummary = {
+  task_id: string; kind: "task" | "attack"; task: string; profile: string | null; status: string;
+  started: number | null; duration_s: number | null; events: number; tool_calls: number;
+  egress_blocked: number; denied: number; approvals: number; verified: boolean;
+};
 export type PendingApproval = { id: string; task_id: string; expires_at: number };
 
 export type AttackTry = { tool: string; text: string; content: string | null };
@@ -55,6 +60,9 @@ async function json<T>(r: Response): Promise<T> {
 export const createTask = (task: string, profile: Profile) =>
   fetch("/api/tasks", { method: "POST", headers: headers(), body: JSON.stringify({ task, profile }) })
     .then(r => json<{ task_id: string; status: string }>(r));
+
+export const listTasks = (limit = 50) =>
+  fetch(`/api/tasks?limit=${limit}`, { headers: headers() }).then(r => json<{ tasks: TaskSummary[] }>(r));
 
 export const getReport = (id: string) =>
   fetch(`/api/tasks/${id}/report`, { headers: headers() }).then(r => json<Report>(r));

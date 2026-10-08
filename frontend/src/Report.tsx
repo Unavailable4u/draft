@@ -76,6 +76,7 @@ export function ReportScreen({ taskId, done }: { taskId: string | null; done: bo
   };
   const save = (f: "json" | "html") => downloadReport(report!.task_id, f).catch(e => setErr((e as Error).message));
 
+  const quiet = report?.complete && report.outcome === "finished" && report.tool_calls === 0;
   const btn = "rounded border border-zinc-700 px-3 py-1 text-xs text-zinc-300 hover:border-zinc-500 disabled:opacity-40";
   return (
     <div className="min-h-0 flex-1 overflow-y-auto p-4">
@@ -99,8 +100,8 @@ export function ReportScreen({ taskId, done }: { taskId: string | null; done: bo
                 {report.summary && <p className="mt-2 text-sm text-zinc-400">{report.summary}</p>}
               </div>
               <div className="text-right">
-                <div className={`text-lg font-semibold ${report.outcome === "finished" ? "text-emerald-400" : report.complete ? "text-amber-400" : "text-zinc-400"}`}>
-                  {report.complete ? report.outcome : "running"}
+                <div className={`text-lg font-semibold ${quiet ? "text-zinc-300" : report.outcome === "finished" ? "text-emerald-400" : report.complete ? "text-amber-400" : "text-zinc-400"}`}>
+                  {!report.complete ? "running" : quiet ? "answered · no commands" : report.outcome}
                 </div>
                 <div className="text-xs text-zinc-500">{report.steps} steps · {report.tool_calls} tool calls</div>
               </div>

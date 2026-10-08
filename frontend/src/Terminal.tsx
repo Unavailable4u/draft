@@ -19,7 +19,12 @@ function render(e: LedgerEvent): string {
       if (p.tool === "finish") return "";
       return `${D}# ${p.tool} ${clean(String(a?.path ?? ""))}${X}\n`;
     }
-    case "tool.result": return `${clean(String(p.result ?? ""))}\n`;
+    case "tool.result": {
+      const m = clean(String(p.result ?? "")).match(/^exit_code=(-?\d+)\n?([\s\S]*)$/);
+      if (!m) return `${clean(String(p.result ?? ""))}\n`;   // e.g. a policy block message
+      const body = m[2].replace(/\n+$/, "");
+      return `${body ? body + "\n" : ""}${m[1] === "0" ? D : R}[exit ${m[1]}]${X}\n`;
+    }
     case "policy.decision":
       return p.action === "allow" ? "" : `${p.action === "deny" ? R : Y}[policy:${p.action}] ${clean((p.reasons ?? []).join("; "))}${X}\n`;
     case "egress.blocked": return `${R}[egress blocked] ${clean(String(p.host))} (${clean(String(p.reason ?? ""))})${X}\n`;

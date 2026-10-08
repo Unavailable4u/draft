@@ -10,6 +10,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 
 from minilocker.ledger.chain import read_events
+from minilocker.ledger.summary import summarize
 from minilocker.policy.approvals import ApprovalGate
 from minilocker.policy.engine import PolicyEngine
 
@@ -146,6 +147,25 @@ class TaskManager:
         if p is None or not os.path.exists(p):
             return None
         return read_events(p)
+
+    def list_summaries(self, limit: int = 50) -> list[dict]:
+        """Newest first. Disk is the source of truth; in-memory state only says what is still running."""
+        entries = []
+        try:
+            for de in os.scandir(self.ledger_dir):
+                tid = de.name[:-len(".jsonl")]
+                if de.name.endswith(".jsonl") and TASK_ID_RE.match(tid) and de.is_file():
+                    entries.append((de.stat().st_mtime, tid))
+        except FileNotFoundError:
+            return []
+        out = []
+        for _, tid in sorted(entries, reverse=True)[:limit]:
+            loaded = self.load_events(tid)
+            if loaded is None:
+                continue
+            st = self.tasks.get(tid)
+            out.append(summarize(tid, *loaded, live=st is not None and st.status == "running"))
+        return out
 
     # ---- approvals -------------------------------------------------------
     def pending_approvals(self, task_id=None):

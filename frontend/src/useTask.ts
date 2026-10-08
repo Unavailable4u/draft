@@ -46,6 +46,6 @@ export function useTask() {
     return [...open.values()][0] ?? null;
   }, [events, end]);
 
-  return { taskId, events, end, report, error, approval, running: taskId !== null && end === null, start };
+  return { taskId, events, end, report, error, approval, running: taskId !== null && end === null, start, attach };
 }
 export type TaskApi = ReturnType<typeof useTask>;
