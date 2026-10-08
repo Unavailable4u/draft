@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { getToken, setToken } from "./api";
+import { AttackLab } from "./AttackLab";
 import { ApprovalModal, BlastPanel, StepStream, Stub, TaskForm } from "./components";
 import { ReportScreen } from "./Report";
 import { TerminalView } from "./Terminal";
+import { useAttacks } from "./useAttacks";
 import { useTask } from "./useTask";
 import type { TaskApi } from "./useTask";
 
@@ -12,7 +14,7 @@ type Tab = "terminal" | "browser" | "files";
 const SCREENS: { id: Screen; label: string; needs?: string }[] = [
   { id: "workspace", label: "Workspace" },
   { id: "timeline", label: "Timeline", needs: "Needs snapshots and POST /api/tasks/{id}/rewind (Week 4)." },
-  { id: "attacks", label: "Attack Lab", needs: "Needs GET /api/attacks and POST /api/attacks/{name}/run (Week 4)." },
+  { id: "attacks", label: "Attack Lab" },
   { id: "report", label: "Report" },
   { id: "sessions", label: "Sessions", needs: "Needs a GET /api/tasks list endpoint." },
   { id: "infra", label: "Infra", needs: "Needs an infra/status endpoint (VM, running sandboxes, resource use)." },
@@ -51,6 +53,11 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>("workspace");
   const [token, setTok] = useState(getToken());
   const t = useTask();
+  const lab = useAttacks();
+  // An attack's report overrides the workspace task until the workspace starts a new one.
+  const [reportOverride, setReportOverride] = useState<string | null>(null);
+  useEffect(() => setReportOverride(null), [t.taskId]);
+  const reportId = reportOverride ?? t.taskId;
   const cur = SCREENS.find(s => s.id === screen)!;
   const status = !t.taskId ? "idle" : t.running ? "running" : (t.end?.status ?? "done");
   return (
@@ -71,7 +78,8 @@ export default function App() {
           className="w-28 rounded border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs" />
       </header>
       {screen === "workspace" ? <Workspace t={t} />
-        : screen === "report" ? <ReportScreen taskId={t.taskId} done={t.taskId !== null && !t.running} />
+        : screen === "attacks" ? <AttackLab lab={lab} onOpenReport={id => { setReportOverride(id); setScreen("report"); }} />
+        : screen === "report" ? <ReportScreen taskId={reportId} done={reportOverride !== null || (t.taskId !== null && !t.running)} />
         : <Stub title={cur.label} needs={cur.needs!} />}
       {t.approval && t.taskId && <ApprovalModal key={t.approval.payload.id} ev={t.approval} taskId={t.taskId} />}
     </div>

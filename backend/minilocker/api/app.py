@@ -4,6 +4,7 @@ import asyncio
 import hmac
 import json
 import os
+import threading
 from contextlib import asynccontextmanager
 from typing import Literal
 
@@ -13,6 +14,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from minilocker.api.tasks import TaskLimitError, TaskManager
+from minilocker.attacks import ATTACKS, describe, get_attack
 from minilocker.ledger.chain import verify_events
 from minilocker.ledger.report import build_report, render_html
 
@@ -44,8 +46,14 @@ def _default_egress():
     return EgressManager(allow).start()
 
 
+def _default_attack_runner():
+    from minilocker.attacks import run_attack
+    return run_attack
+
+
 def create_app(runner=None, llm_factory=None, egress_factory=None, ledger_dir=None,
-               max_concurrent=None, approval_timeout_s=None, api_token=None) -> FastAPI:
+               max_concurrent=None, approval_timeout_s=None, api_token=None,
+               attack_runner=None) -> FastAPI:
     """Everything environment-specific is injectable so the API can be tested
     without Docker or a real model."""
     ledger_dir = ledger_dir or os.environ.get("MINILOCKER_LEDGER_DIR", "runs")
@@ -72,6 +80,9 @@ def create_app(runner=None, llm_factory=None, egress_factory=None, ledger_dir=No
     app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["GET", "POST"],
                        allow_headers=["Authorization", "Content-Type", "Last-Event-ID"])
     make_llm = llm_factory or _default_llm_factory()
+    run_attack = attack_runner or _default_attack_runner()
+    # Attacks are heavy (fork bomb, 512 MB allocation) and run code: one at a time by default.
+    attack_slots = threading.BoundedSemaphore(int(os.environ.get("MINILOCKER_MAX_ATTACKS", "1")))
 
     def auth(request: Request):
         # Optional shared-secret guard. POST /api/tasks spends LLM credits and runs
@@ -196,6 +207,27 @@ def create_app(runner=None, llm_factory=None, egress_factory=None, ledger_dir=No
             ok, detail = False, f"ledger unreadable: {err}"
         return {"task_id": task_id, "verified": ok, "detail": detail, "events": len(events),
                 "head_hash": events[-1]["hash"] if events else None}
+
+    # ---- Attack Lab -----------------------------------------------------------
+    @app.get("/api/attacks", dependencies=[Depends(auth)])
+    def list_attacks(request: Request):
+        attached = getattr(request.app.state, "egress", None) is not None
+        return {"egress_attached": attached, "attacks": [describe(a, attached) for a in ATTACKS]}
+
+    @app.post("/api/attacks/{name}/run", dependencies=[Depends(auth)])
+    def run_attack_endpoint(name: str, request: Request):
+        """Runs a scripted attack through the real loop, policy and sandbox and returns a
+        containment verdict. Blocking (seconds to ~30 s); the ledger is kept like any task's,
+        so /api/tasks/{task_id}/report and /api/ledger/verify/{task_id} work on the result."""
+        attack = get_attack(name)
+        if attack is None:
+            raise HTTPException(404, "unknown attack")
+        if not attack_slots.acquire(blocking=False):
+            raise HTTPException(429, "another attack is already running", headers={"Retry-After": "5"})
+        try:
+            return run_attack(attack, ledger_dir=ledger_dir, egress=getattr(request.app.state, "egress", None))
+        finally:
+            attack_slots.release()
 
     return app
 

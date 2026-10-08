@@ -14,6 +14,26 @@ export type Report = {
 export type Verification = { task_id: string; verified: boolean; detail: string; events: number; head_hash: string | null };
 export type PendingApproval = { id: string; task_id: string; expires_at: number };
 
+export type AttackTry = { tool: string; text: string; content: string | null };
+export type AttackInfo = {
+  name: string; title: string; category: string; profile: Profile; summary: string; expected: string;
+  needs_egress: boolean; available: boolean; tries: AttackTry[]; checks: string[];
+};
+export type CheckStatus = "pass" | "fail" | "unproven" | "skip";
+export type AttackCheck = { label: string; status: CheckStatus; detail: string; scope: "attack" | "always" };
+export type AttackStep = {
+  index: number; tool: string; text: string; content: string | null; result: string | null;
+  policy: { action: string; risk: string; reasons: string[]; profile: string } | null;
+  approval: string | null; recreated: boolean;
+  egress: { decision: string; host: string | null; reason: string | null }[];
+};
+export type Verdict = "contained" | "breached" | "inconclusive" | "error" | "unavailable";
+export type AttackResult = {
+  name: string; title: string; verdict: Verdict; task_id: string | null; duration_s: number;
+  error: string | null; checks: AttackCheck[]; steps: AttackStep[];
+  counts: Record<CheckStatus, number>;
+};
+
 const TOKEN_KEY = "minilocker.token";
 export const getToken = () => localStorage.getItem(TOKEN_KEY) ?? "";
 export const setToken = (t: string) => localStorage.setItem(TOKEN_KEY, t);
@@ -52,6 +72,14 @@ export async function downloadReport(id: string, format: "json" | "html") {
   a.click();
   URL.revokeObjectURL(a.href);
 }
+
+export const listAttacks = () =>
+  fetch("/api/attacks", { headers: headers() })
+    .then(r => json<{ egress_attached: boolean; attacks: AttackInfo[] }>(r));
+
+/** Blocking: resolves when the attack has finished (seconds, up to ~30 s). */
+export const runAttack = (name: string) =>
+  fetch(`/api/attacks/${name}/run`, { method: "POST", headers: headers() }).then(r => json<AttackResult>(r));
 
 export const listApprovals = (taskId: string) =>
   fetch(`/api/approvals?task_id=${taskId}`, { headers: headers() })
