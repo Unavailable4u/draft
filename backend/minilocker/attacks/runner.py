@@ -214,7 +214,8 @@ def run_attack(attack, *, ledger_dir="runs", egress=None, runner=None, sandbox_e
         try:
             run = (runner or run_task)(f"Attack Lab: {attack.title}", ScriptedAttacker(script), ledger_dir=ledger_dir,
                                        egress=egress, policy=policy, approver=None, on_event=events.append,
-                                       task_id=task_id, **({"artifacts": artifacts} if artifacts is not None else {}))
+                                       task_id=task_id, **({"artifacts": artifacts} if artifacts is not None else {}),
+                                       **({"browser_fixtures": True} if attack.needs_browser else {}))
         except Exception as e:
             traceback.print_exc()
             res["error"] = f"{type(e).__name__}: the attack could not run (is the Docker daemon reachable?)"

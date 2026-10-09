@@ -39,7 +39,7 @@ class Sandbox:
 
     def __init__(self, image="python:3.12-slim", workspace_mb=64, egress=None, *,
                  role="code", command="sleep infinity", mem_limit="512m", pids_limit=128,
-                 tmp_mb=None, shm_size=None):
+                 tmp_mb=None, shm_size=None, extra_env=None):
         self.role = role
         self.name = f"minilocker-{'' if role == 'code' else role + '-'}{uuid.uuid4().hex[:8]}"
         env = {"HOME": "/tmp"}
@@ -49,6 +49,7 @@ class Sandbox:
             env.update(egress.proxy_env())
         else:
             net["network_mode"] = "none"
+        env.update(extra_env or {})
         extra = {"shm_size": shm_size} if shm_size else {}
         self.container = _client().containers.run(
             image,

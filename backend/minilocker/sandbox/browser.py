@@ -34,7 +34,8 @@ def image_present(image: str = None) -> bool:
 
 
 class BrowserSandbox:
-    def __init__(self, egress=None, image: str = None, sandbox_cls=Sandbox, start_timeout_s=START_TIMEOUT_S):
+    def __init__(self, egress=None, image: str = None, sandbox_cls=Sandbox, start_timeout_s=START_TIMEOUT_S,
+                 fixtures: bool = False):
         image = image or BROWSER_IMAGE
         # Checked first: `docker run` would otherwise try to PULL a local-only name from Docker Hub.
         if not image_present(image):
@@ -45,7 +46,9 @@ class BrowserSandbox:
                 command=["python", "-u", "/opt/browser_worker.py", "serve"],
                 workspace_mb=8, tmp_mb=192, mem_limit="1g",
                 pids_limit=512,          # Chromium is multi-process and counts threads
-                shm_size="256m")
+                shm_size="256m",
+                # Attack Lab only: serve the hostile fixtures on loopback and let loopback bypass the proxy
+                **({"extra_env": {"MINILOCKER_BROWSER_FIXTURES": "1"}} if fixtures else {}))
         except (docker.errors.APIError, docker.errors.ImageNotFound) as e:
             raise BrowserUnavailable(f"could not start the browser container: {type(e).__name__}") from e
         self.name, self.ip = self.sb.name, self.sb.ip

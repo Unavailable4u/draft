@@ -26,7 +26,7 @@ def main():
         sys.exit(f"image not built. Run from the repo root:\n  {BUILD_HINT}")
     print("starting browser sandbox (no egress: loopback fixtures only) ...")
     try:
-        b = BrowserSandbox(egress=None)
+        b = BrowserSandbox(egress=None, fixtures=True)
     except BrowserUnavailable as e:
         sys.exit(f"could not start: {e}")
     try:
@@ -41,7 +41,7 @@ def main():
         check("returns a JPEG screenshot", shot[:3] == b"\xff\xd8\xff", f"{len(shot)} bytes")
         link = next((e for e in r.get("elements", []) if e["tag"] == "a"), None)
         r2 = b.call("click", {"ref": link["ref"]}) if link else {}
-        check("clicks a link by ref", r2.get("ok") and "Second page" in r2.get("title", ""), r2.get("error", ""))
+        check("clicks a link by ref", r2.get("ok") and "Second clean page" in r2.get("title", ""), r2.get("error", ""))
         r3 = b.call("goto", {"url": "file:///etc/passwd"})
         check("refuses file:// itself", not r3.get("ok") and "not allowed" in r3.get("error", ""))
         r4 = b.call("goto", {"url": f"{BASE}/local_files.html", "wait_ms": 2500})

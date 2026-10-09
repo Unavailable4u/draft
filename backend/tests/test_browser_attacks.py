@@ -31,8 +31,10 @@ class Code:
 class Browser:
     """A contained browser unless `mode` says otherwise."""
     mode, hardening_override, fail_start = "", None, False
+    last_fixtures = None
 
-    def __init__(self, egress=None):
+    def __init__(self, egress=None, fixtures=False):
+        Browser.last_fixtures = fixtures
         if Browser.fail_start:
             raise BrowserUnavailable("the browser container exited while starting")
         self.name, self.ip, self.dead, self.page, self.first = "fake-browser", "10.0.0.3", False, None, True

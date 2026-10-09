@@ -241,15 +241,34 @@ def start_fixtures():
     return srv
 
 
+def fixtures_enabled(env=None) -> bool:
+    """Only the Attack Lab turns this on. Real browsing tasks serve nothing on loopback."""
+    return (os.environ if env is None else env).get("MINILOCKER_BROWSER_FIXTURES") == "1"
+
+
+def proxy_settings(env=None):
+    """Playwright's `proxy=` argument, or None when no egress proxy is attached.
+
+    Playwright (1.63, crBrowser.ts `shouldProxyLoopback`) forces Chromium's `<-loopback>` rule
+    unless the bypass list names a loopback host, which sends 127.0.0.1 through the egress
+    proxy too. For real browsing that is what we want: nothing on loopback is reachable by a
+    page. The Attack Lab's hostile pages are served on loopback INSIDE this container, so when
+    fixtures are enabled loopback must bypass the proxy; it can only reach this container."""
+    env = os.environ if env is None else env
+    server = env.get("HTTPS_PROXY") or env.get("https_proxy")
+    if not server:
+        return None
+    return {"server": server, **({"bypass": "127.0.0.1,localhost"} if fixtures_enabled(env) else {})}
+
+
 # ---- process entry points ------------------------------------------------------------------
 def serve():
     from playwright.sync_api import sync_playwright   # imported here: see module docstring
 
-    start_fixtures()
-    proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
+    if fixtures_enabled():
+        start_fixtures()
     pw = sync_playwright().start()
-    browser = pw.chromium.launch(headless=True, args=CHROMIUM_ARGS,
-                                 proxy={"server": proxy} if proxy else None)
+    browser = pw.chromium.launch(headless=True, args=CHROMIUM_ARGS, proxy=proxy_settings())
     ctx = browser.new_context(viewport=VIEWPORT, accept_downloads=False, service_workers="block",
                               java_script_enabled=True, permissions=[])
     ctx.set_default_timeout(ACTION_TIMEOUT_MS)

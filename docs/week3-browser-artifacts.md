@@ -47,7 +47,11 @@ Mitigations that do not: seccomp tighter than Docker's default, gVisor/Kata. Say
 residual risk of this component and the first thing to harden if time allows.
 
 **Hostile test pages are baked into the image** and served on loopback inside the browser container, so the Attack Lab is
-offline and deterministic. The same pages are reachable by the agent (harmless: static, in its own container).
+offline and deterministic. They are served, and loopback is let past the egress proxy, only when the Attack Lab starts the
+browser with `MINILOCKER_BROWSER_FIXTURES=1`. In a real task nothing listens on loopback and Playwright routes loopback
+through the proxy, which refuses it, so a page can reach nothing on the container itself. (Playwright forces Chromium's
+`<-loopback>` rule whenever a proxy is set unless the bypass list names a loopback host; `proxy_settings()` in
+`browser_worker.py` is the one place that decides, and `tests/test_browser_fixtures.py` pins it.)
 
 **Where the model's text comes from.** Page text, titles, link labels and URLs all reach the model inside
 `<<<BEGIN UNTRUSTED nonce>>>` markers (random nonce, so a page cannot forge the end), after invisible-Unicode stripping.

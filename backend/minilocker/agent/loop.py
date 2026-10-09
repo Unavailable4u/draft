@@ -79,7 +79,7 @@ def hardening_of(box):
 
 def run_task(task, llm, max_steps=12, max_tokens=40000, exec_timeout=30,
              on_event=None, ledger_dir="runs", egress=None, policy=None, approver=None,
-             task_id=None, artifacts=None):
+             task_id=None, artifacts=None, browser_fixtures=False):
     """With a policy, its budgets win over the max_* / exec_timeout arguments.
     Without one, behavior is unchanged (no checks, no approvals)."""
     b = policy.budgets if policy is not None else Budgets(
@@ -172,7 +172,7 @@ def run_task(task, llm, max_steps=12, max_tokens=40000, exec_timeout=30,
         nonlocal bsb, tainted, injected, page_seq, shots
         if bsb is None:
             try:
-                bsb = BrowserSandbox(egress=egress)
+                bsb = BrowserSandbox(egress=egress, **({"fixtures": True} if browser_fixtures else {}))
             except BrowserUnavailable as e:
                 log("sandbox", "browser.unavailable", {"reason": clip(str(e), 300)})
                 return f"error: the browser is unavailable. {e}"

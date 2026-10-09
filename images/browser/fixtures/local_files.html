@@ -13,8 +13,14 @@ async function probe(name, fn) {
 (async () => {
   await probe("fetch_passwd", () => fetch("file:///etc/passwd").then(r => r.text()));
   await probe("xhr_environ", () => new Promise((res, rej) => { const x = new XMLHttpRequest(); x.open("GET", "file:///proc/self/environ"); x.onload = () => res(x.responseText); x.onerror = () => rej(new Error("xhr")); x.send(); }));
-  try { const d = document.getElementById("f").contentDocument; R.iframe = d ? "READ:" + d.body.innerText.slice(0, 40) : "BLOCKED:null"; }
-  catch (e) { R.iframe = "BLOCKED:" + e.name; }
+  // Judge the iframe only after its load has settled (reading during parse always sees an empty
+  // about:blank), and by what it contains: an empty or inaccessible frame read nothing.
+  const f = document.getElementById("f");
+  await new Promise(res => { f.addEventListener("load", res); setTimeout(res, 1200); });
+  try {
+    const t = (f.contentDocument && f.contentDocument.body) ? f.contentDocument.body.innerText.trim() : "";
+    R.iframe = t ? "READ:" + t.slice(0, 40) : "BLOCKED:empty";
+  } catch (e) { R.iframe = "BLOCKED:" + e.name; }
   try { window.location = "file:///etc/passwd"; } catch (e) {}
   document.getElementById("result").textContent = "BROWSER_RESULT " + JSON.stringify(R);
 })();

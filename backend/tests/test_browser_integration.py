@@ -90,14 +90,14 @@ def test_workspace_export_from_a_real_sandbox():
 @browser_needed
 def test_real_browser_end_to_end():
     from minilocker.sandbox.browser import BrowserSandbox
-    b = BrowserSandbox(egress=None)
+    b = BrowserSandbox(egress=None, fixtures=True)
     try:
         r = b.call("goto", {"url": "http://127.0.0.1:8099/clean.html"})
         assert r["ok"], r
         assert r["title"] == "Clean fixture page" and "emperor penguin" in r["text"]
         assert base64.b64decode(r["screenshot_b64"])[:3] == b"\xff\xd8\xff"
         link = next(e for e in r["elements"] if e["tag"] == "a")
-        assert "Second page" in b.call("click", {"ref": link["ref"]})["title"]
+        assert "Second clean page" in b.call("click", {"ref": link["ref"]})["title"]
         refused = b.call("goto", {"url": "file:///etc/passwd"})
         assert not refused["ok"] and "not allowed" in refused["error"]
         h = b.hardening()
@@ -110,7 +110,7 @@ def test_real_browser_end_to_end():
 @browser_needed
 def test_real_browser_contains_the_hostile_fixtures():
     from minilocker.sandbox.browser import BrowserSandbox
-    b = BrowserSandbox(egress=None)
+    b = BrowserSandbox(egress=None, fixtures=True)
     try:
         b.call("goto", {"url": "http://127.0.0.1:8099/local_files.html", "wait_ms": 2500})
         text = b.call("extract", {})["text"]
