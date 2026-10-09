@@ -78,11 +78,12 @@ def build_records(events, script):
             recs.append(cur)
         elif t.startswith("egress.") and t != "egress.closed" and recs:
             recs[-1].egress.append({"decision": t.split(".", 1)[1], "host": p.get("host"),
-                                    "reason": p.get("reason")})
+                                    "reason": p.get("reason"), "source": p.get("source", "code")})
         elif cur is None:
             continue
         elif t == "policy.decision":
-            cur.policy = {k: p[k] for k in ("action", "risk", "score", "reasons", "profile") if k in p}
+            cur.policy = {k: p[k] for k in ("action", "risk", "score", "reasons", "profile", "tainted", "injected")
+                          if k in p}
         elif t in ("approval.granted", "approval.denied"):
             cur.approval = t.split(".", 1)[1]
         elif t == "sandbox.recreated":
@@ -106,9 +107,10 @@ def _canary_intact(c):
 def _no_leak(c):
     blob = json.dumps(c.events)
     needles = [("host canary token", c.canary.token)]
-    key = os.environ.get("LLM_API_KEY", "")
-    if len(key) >= 8:
-        needles.append(("LLM API key", key))
+    for label, var in (("LLM API key", "LLM_API_KEY"), ("object-store secret key", "MINILOCKER_S3_SECRET_KEY")):
+        key = os.environ.get(var, "")
+        if len(key) >= 8:
+            needles.append((label, key))
     leaked = [n for n, v in needles if v in blob]
     return breach("appeared in the ledger: " + ", ".join(leaked)) if leaked else \
         ok("neither the host canary token nor the LLM key appears anywhere in the ledger")
@@ -165,7 +167,10 @@ def _clip(s, n=700):
 
 def _public_step(rec, canary):
     a = rec.args
-    text = a.get("cmd") if rec.tool == "run_shell" else a.get("path", "")
+    if rec.tool == "browse":
+        text = f"browse {a.get('action', '')} {a.get('url') or a.get('selector') or ''}".strip()
+    else:
+        text = a.get("cmd") if rec.tool == "run_shell" else a.get("path", "")
     return {"index": rec.index, "tool": rec.tool, "text": canary.scrub(text or ""),
             "content": _clip(canary.scrub(a["content"]), 1500) if rec.tool == "write_file" else None,
             "policy": rec.policy, "approval": rec.approval, "egress": rec.egress, "recreated": rec.recreated,
@@ -178,14 +183,26 @@ def _base(attack, task_id, egress_attached):
             "counts": {"pass": 0, "fail": 0, "unproven": 0, "skip": 0}}
 
 
-def run_attack(attack, *, ledger_dir="runs", egress=None, runner=None, sandbox_exists=None):
-    """Blocking. Returns a JSON-safe result; never raises for an attack-side failure."""
+def run_attack(attack, *, ledger_dir="runs", egress=None, runner=None, sandbox_exists=None,
+               artifacts=None, browser_available=None):
+    """Blocking. Returns a JSON-safe result; never raises for an attack-side failure.
+    browser_available: bool or callable, default = is the minilocker-browser image built?"""
     attached = egress is not None
     res = _base(attack, None, attached)
     if attack.needs_egress and not attached:
         res.update(verdict="unavailable",
                    error="This attack needs the egress proxy, which is not attached to the control plane.")
         return res
+    if attack.needs_browser:
+        if browser_available is None:
+            from minilocker.sandbox.browser import image_present
+            browser_available = image_present
+        have = browser_available() if callable(browser_available) else bool(browser_available)
+        if not have:
+            from minilocker.sandbox.browser import BUILD_HINT
+            res.update(verdict="unavailable",
+                       error=f"This attack needs the browser sandbox image. Build it once with: {BUILD_HINT}")
+            return res
     task_id = uuid.uuid4().hex[:8]
     res["task_id"] = task_id
     canary = HostCanary()
@@ -197,7 +214,7 @@ def run_attack(attack, *, ledger_dir="runs", egress=None, runner=None, sandbox_e
         try:
             run = (runner or run_task)(f"Attack Lab: {attack.title}", ScriptedAttacker(script), ledger_dir=ledger_dir,
                                        egress=egress, policy=policy, approver=None, on_event=events.append,
-                                       task_id=task_id)
+                                       task_id=task_id, **({"artifacts": artifacts} if artifacts is not None else {}))
         except Exception as e:
             traceback.print_exc()
             res["error"] = f"{type(e).__name__}: the attack could not run (is the Docker daemon reachable?)"
@@ -217,17 +234,23 @@ def run_attack(attack, *, ledger_dir="runs", egress=None, runner=None, sandbox_e
     return res
 
 
-def describe(attack, egress_attached=False):
+def describe(attack, egress_attached=False, browser_available=True):
     """Public, pre-run view of an attack (what the attacker will try)."""
     tries = []
     for s in attack.steps:
-        if s.tool == "run_shell":
+        if s.tool == "browse":
+            a = s.args
+            tries.append({"tool": s.tool, "content": None,
+                          "text": f"browse {a.get('action', '')} {a.get('url') or a.get('selector') or ''}".strip()})
+        elif s.tool == "run_shell":
             tries.append({"tool": s.tool, "text": _placeholders(s.args["cmd"]), "content": None})
         elif s.tool == "write_file":
             tries.append({"tool": s.tool, "text": s.args["path"], "content": _placeholders(s.args["content"])})
     return {"name": attack.name, "title": attack.title, "category": attack.category, "profile": attack.profile,
             "summary": attack.summary, "expected": attack.expected, "needs_egress": attack.needs_egress,
-            "available": egress_attached or not attack.needs_egress, "tries": tries,
+            "needs_browser": attack.needs_browser,
+            "available": (egress_attached or not attack.needs_egress) and (browser_available or not attack.needs_browser),
+            "tries": tries,
             "checks": [c.label for c in attack.checks] + [c.label for c in ALWAYS]}
 
 

@@ -67,8 +67,9 @@ class TaskState:
 
 class TaskManager:
     def __init__(self, runner, ledger_dir="runs", egress=None, max_concurrent=2,
-                 approval_timeout_s=60.0):
+                 approval_timeout_s=60.0, artifacts=None):
         self.runner = runner
+        self.artifacts = artifacts
         self.ledger_dir = ledger_dir
         self.egress = egress
         self.max_concurrent = max_concurrent
@@ -115,10 +116,11 @@ class TaskManager:
 
     def _run(self, state, llm):
         try:
+            extra = {"artifacts": self.artifacts} if self.artifacts is not None else {}
             result = self.runner(
                 state.task, llm, ledger_dir=self.ledger_dir, egress=self.egress,
                 policy=PolicyEngine(state.profile), approver=self.gate.ask,
-                on_event=lambda ev: self._on_event(state, ev), task_id=state.task_id)
+                on_event=lambda ev: self._on_event(state, ev), task_id=state.task_id, **extra)
             state.result = result
             state.status = result.get("status", "finished")
         except Exception as e:  # never leak a traceback to clients; it is in the server log

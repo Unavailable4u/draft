@@ -6,6 +6,7 @@ zero ("measure, don't claim")."""
 import html
 import json
 from collections import Counter
+from urllib.parse import urlsplit
 
 from minilocker.ledger.chain import verify_events
 
@@ -44,6 +45,10 @@ def build_report(task_id: str, events: list[dict], read_error: str | None = None
         "bytes_out": sum(e["payload"].get("bytes_up", 0) for e in closed),
         "bytes_in": sum(e["payload"].get("bytes_down", 0) for e in closed),
         "blocked_reasons": dict(Counter(e["payload"].get("reason", "?") for e in blocked)),
+        # which container made the request (events from before the browser existed are all "code")
+        "by_source": {src: {"allowed": sum(1 for e in allowed if e["payload"].get("source", "code") == src),
+                            "blocked": sum(1 for e in blocked if e["payload"].get("source", "code") == src)}
+                      for src in sorted({e["payload"].get("source", "code") for e in allowed + blocked})},
         "evidence": _ids(blocked),
     }
 
@@ -89,6 +94,45 @@ def build_report(task_id: str, events: list[dict], read_error: str | None = None
         "evidence": _ids(recreated),
     }
 
+    stored, skipped = t.get("artifact.stored", []), t.get("artifact.skipped", [])
+    art_failed = t.get("artifact.failed", []) + t.get("artifact.export_failed", [])
+    if stored or skipped or art_failed:
+        artifacts = {
+            "status": "measured" if complete else "in_progress",
+            "stored": len(stored),
+            "files": sum(1 for e in stored if e["payload"].get("kind") == "file"),
+            "screenshots": sum(1 for e in stored if e["payload"].get("kind") == "screenshot"),
+            "bytes": sum(e["payload"].get("bytes", 0) for e in stored),
+            "skipped": len(skipped),
+            "failed": len(art_failed),
+            "evidence": _ids(stored + skipped + art_failed),
+        }
+    else:
+        artifacts = {**NOT_MEASURED, "note": "no artifact events: no store attached, or nothing was produced"}
+
+    pages, unavailable = t.get("browser.page", []), t.get("browser.unavailable", [])
+    flagged = t.get("injection.suspected", [])
+    if pages or unavailable:
+        def host(e):
+            try:
+                return urlsplit(e["payload"].get("url", "")).hostname
+            except ValueError:
+                return None
+        count = lambda k: sum(e["payload"].get(k, 0) for e in pages)
+        browser = {
+            "status": "measured" if complete else "in_progress",
+            "pages": len(pages),
+            "hosts": sorted({h for h in map(host, pages) if h}),
+            "injection_suspected": len(flagged),
+            "popups_blocked": count("popups_blocked"),
+            "dialogs_dismissed": count("dialogs"),
+            "downloads_blocked": count("downloads"),
+            "unavailable": bool(unavailable),
+            "evidence": _ids(flagged + unavailable),
+        }
+    else:
+        browser = {"status": "not_used"}
+
     return {
         "task_id": task_id,
         "task": (start or {}).get("payload", {}).get("task"),
@@ -104,6 +148,8 @@ def build_report(task_id: str, events: list[dict], read_error: str | None = None
             "policy": policy,
             "persistence": persistence,
             "time": time_dim,
+            "browser": browser,
+            "artifacts": artifacts,
             # Not instrumented yet; will be filled by sandbox stats / canary work.
             "filesystem": {**NOT_MEASURED, "note": "host-path and out-of-workspace write "
                            "accounting not instrumented yet"},

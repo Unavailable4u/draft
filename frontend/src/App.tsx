@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { getToken, setToken } from "./api";
 import { AttackLab } from "./AttackLab";
+import { BrowserView } from "./Browser";
 import { ApprovalModal, BlastPanel, StepStream, Stub, TaskForm } from "./components";
+import { FilesView } from "./Files";
 import { ReportScreen } from "./Report";
 import { SessionsScreen } from "./Sessions";
 import { TerminalView } from "./Terminal";
@@ -39,8 +41,8 @@ function Workspace({ t }: { t: TaskApi }) {
         </div>
         <div className="min-h-0 flex-1 bg-zinc-950">
           <div className={`h-full ${hidden("terminal")}`}><TerminalView events={t.events} /></div>
-          {tab === "browser" && <Stub title="Browser" needs="Live screenshots arrive with the browser sandbox (Week 3)." />}
-          {tab === "files" && <Stub title="Files" needs="Workspace files arrive with the artifact store." />}
+          {tab === "browser" && <BrowserView taskId={t.taskId} events={t.events} running={t.running} />}
+          {tab === "files" && <FilesView taskId={t.taskId} events={t.events} running={t.running} />}
         </div>
       </section>
       <section className="min-h-0 border-l border-zinc-800">

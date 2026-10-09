@@ -10,10 +10,12 @@ from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from minilocker.api.tasks import TaskLimitError, TaskManager
+from minilocker.artifacts import serve_headers, sha256_hex
+from minilocker.artifacts.index import index_from_events
 from minilocker.attacks import ATTACKS, describe, get_attack
 from minilocker.ledger.chain import verify_events
 from minilocker.ledger.report import build_report, render_html
@@ -46,6 +48,17 @@ def _default_egress():
     return EgressManager(allow).start()
 
 
+def _default_artifacts():
+    """(store, error). Configured-but-unreachable is reported, not hidden: the Files tab shows why."""
+    from minilocker.artifacts import S3ArtifactStore
+    try:
+        return S3ArtifactStore.from_env(), None
+    except Exception as e:
+        import sys
+        print(f"[minilocker] artifact store unavailable: {type(e).__name__}: {e}", file=sys.stderr)
+        return None, f"{type(e).__name__}"
+
+
 def _default_attack_runner():
     from minilocker.attacks import run_attack
     return run_attack
@@ -53,7 +66,7 @@ def _default_attack_runner():
 
 def create_app(runner=None, llm_factory=None, egress_factory=None, ledger_dir=None,
                max_concurrent=None, approval_timeout_s=None, api_token=None,
-               attack_runner=None) -> FastAPI:
+               attack_runner=None, artifacts_factory=None) -> FastAPI:
     """Everything environment-specific is injectable so the API can be tested
     without Docker or a real model."""
     ledger_dir = ledger_dir or os.environ.get("MINILOCKER_LEDGER_DIR", "runs")
@@ -65,9 +78,11 @@ def create_app(runner=None, llm_factory=None, egress_factory=None, ledger_dir=No
     async def lifespan(app):
         egress = (egress_factory or _default_egress)()
         app.state.egress = egress
+        app.state.artifacts, app.state.artifacts_error = (artifacts_factory or _default_artifacts)()
         app.state.mgr = TaskManager(runner or _default_runner(), ledger_dir=ledger_dir, egress=egress,
                                     max_concurrent=max_concurrent,
-                                    approval_timeout_s=approval_timeout_s)
+                                    approval_timeout_s=approval_timeout_s,
+                                    artifacts=app.state.artifacts)
         try:
             yield
         finally:
@@ -78,7 +93,8 @@ def create_app(runner=None, llm_factory=None, egress_factory=None, ledger_dir=No
     app = FastAPI(title="MiniLocker control plane", lifespan=lifespan)
     origins = [o for o in os.environ.get("MINILOCKER_CORS_ORIGINS", "http://localhost:5173").split(",") if o]
     app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["GET", "POST"],
-                       allow_headers=["Authorization", "Content-Type", "Last-Event-ID"])
+                       allow_headers=["Authorization", "Content-Type", "Last-Event-ID"],
+                       expose_headers=["X-Artifact-Sha256"])
     make_llm = llm_factory or _default_llm_factory()
     run_attack = attack_runner or _default_attack_runner()
     # Attacks are heavy (fork bomb, 512 MB allocation) and run code: one at a time by default.
@@ -100,6 +116,16 @@ def create_app(runner=None, llm_factory=None, egress_factory=None, ledger_dir=No
     @app.get("/health")
     def health():
         return {"ok": True}
+
+    @app.get("/api/status", dependencies=[Depends(auth)])
+    def status(request: Request):
+        """What this control plane has attached, for the UI to explain empty tabs honestly."""
+        from minilocker.sandbox.browser import BROWSER_IMAGE, image_present
+        st = request.app.state
+        return {"egress": getattr(st, "egress", None) is not None,
+                "artifacts": {"attached": getattr(st, "artifacts", None) is not None,
+                              "error": getattr(st, "artifacts_error", None)},
+                "browser": {"image": BROWSER_IMAGE, "image_present": image_present()}}
 
     @app.post("/api/tasks", status_code=202, dependencies=[Depends(auth)])
     def create_task(body: TaskRequest, m: TaskManager = Depends(mgr)):
@@ -214,11 +240,48 @@ def create_app(runner=None, llm_factory=None, egress_factory=None, ledger_dir=No
         return {"task_id": task_id, "verified": ok, "detail": detail, "events": len(events),
                 "head_hash": events[-1]["hash"] if events else None}
 
+    # ---- Artifacts ------------------------------------------------------------
+    @app.get("/api/tasks/{task_id}/artifacts", dependencies=[Depends(auth)])
+    def list_artifacts(task_id: str, request: Request, m: TaskManager = Depends(mgr)):
+        events, _ = _events_or_404(m, task_id)
+        idx = index_from_events(events)
+        return {"task_id": task_id, "store_attached": getattr(request.app.state, "artifacts", None) is not None,
+                "artifacts": idx["artifacts"], "skipped": idx["skipped"], "failed": idx["failed"]}
+
+    @app.get("/api/tasks/{task_id}/artifacts/{name:path}", dependencies=[Depends(auth)])
+    def get_artifact(task_id: str, name: str, request: Request, m: TaskManager = Depends(mgr)):
+        """Bytes are served only if (1) the name is one this task's ledger recorded (callers cannot
+        name arbitrary keys), (2) the ledger's hash chain verifies, and (3) the stored bytes match
+        the SHA-256 recorded in it. Content-Type comes from serve_headers, never from the sandbox."""
+        events, err = _events_or_404(m, task_id)
+        ok, _ = verify_events(events)
+        if err or not ok:
+            raise HTTPException(409, "the ledger failed verification; refusing to serve its artifacts")
+        entry = index_from_events(events)["by_name"].get(name)
+        if entry is None:
+            raise HTTPException(404, "no such artifact in this task's ledger")
+        store = getattr(request.app.state, "artifacts", None)
+        if store is None:
+            raise HTTPException(503, "artifact store is not configured")
+        try:
+            data = store.get(task_id, name)
+        except Exception:
+            raise HTTPException(502, "artifact store is unreachable")
+        if data is None:
+            raise HTTPException(404, "the object is missing from the store")
+        if len(data) != entry["bytes"] or sha256_hex(data) != entry["sha256"]:
+            raise HTTPException(409, "the stored object does not match the hash recorded in the ledger")
+        media, headers = serve_headers(name, data)
+        return Response(data, media_type=media, headers={**headers, "X-Artifact-Sha256": entry["sha256"]})
+
     # ---- Attack Lab -----------------------------------------------------------
     @app.get("/api/attacks", dependencies=[Depends(auth)])
     def list_attacks(request: Request):
+        from minilocker.sandbox.browser import image_present
         attached = getattr(request.app.state, "egress", None) is not None
-        return {"egress_attached": attached, "attacks": [describe(a, attached) for a in ATTACKS]}
+        browser_ok = image_present() if any(a.needs_browser for a in ATTACKS) else True
+        return {"egress_attached": attached, "browser_available": browser_ok,
+                "attacks": [describe(a, attached, browser_ok) for a in ATTACKS]}
 
     @app.post("/api/attacks/{name}/run", dependencies=[Depends(auth)])
     def run_attack_endpoint(name: str, request: Request):
@@ -230,8 +293,10 @@ def create_app(runner=None, llm_factory=None, egress_factory=None, ledger_dir=No
             raise HTTPException(404, "unknown attack")
         if not attack_slots.acquire(blocking=False):
             raise HTTPException(429, "another attack is already running", headers={"Retry-After": "5"})
+        store = getattr(request.app.state, "artifacts", None)
         try:
-            return run_attack(attack, ledger_dir=ledger_dir, egress=getattr(request.app.state, "egress", None))
+            return run_attack(attack, ledger_dir=ledger_dir, egress=getattr(request.app.state, "egress", None),
+                              **({"artifacts": store} if store is not None else {}))
         finally:
             attack_slots.release()
 

@@ -4,6 +4,7 @@
 import json
 import re
 
+from minilocker.attacks.browser_attacks import BROWSER_ATTACKS
 from minilocker.attacks.model import (Attack, Check, breach, ok, sh, skip, unproven, write)
 
 MARKER = "irreplaceable workspace data"
@@ -455,7 +456,7 @@ HOOK = Attack(
 )
 
 ATTACKS = (DENY_THEN_BYPASS, RM_RF_ROOT, FORK_BOMB, CPU_BURN, MEMORY_BOMB, DISK_FILL,
-           READ_SECRETS, EXFIL, ESCAPE, HOOK)
+           READ_SECRETS, EXFIL, ESCAPE, HOOK, *BROWSER_ATTACKS)
 BY_NAME = {a.name: a for a in ATTACKS}
 
 

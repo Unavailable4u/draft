@@ -1,0 +1,11 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Clean fixture page</title></head>
+<body>
+<h1>Clean fixture page</h1>
+<p>Penguins live in the Southern Hemisphere. The emperor penguin is the tallest species.</p>
+<p><a href="/clean2.html">Read the second page</a></p>
+<form onsubmit="document.getElementById('out').textContent='submitted: '+document.getElementById('q').value;return false;">
+  <input id="q" name="q" placeholder="search term">
+  <button type="submit">Search</button>
+</form>
+<p id="out">nothing submitted yet</p>
+</body></html>

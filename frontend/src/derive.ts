@@ -10,6 +10,7 @@ export function toolLine(p: Record<string, any>): string {
   const a = parseArgs(p.args ?? "");
   if (p.tool === "run_shell") return a?.cmd ?? p.args;
   if (p.tool === "finish") return a?.summary ?? p.args;
+  if (p.tool === "browse") return `${a?.action ?? "?"} ${a?.url ?? a?.selector ?? (a?.ref != null ? `ref ${a.ref}` : "")}`.trim();
   return a?.path ?? p.args;
 }
 
@@ -17,11 +18,14 @@ export function toolLine(p: Record<string, any>): string {
 export function describe(e: LedgerEvent): { tone: Tone; text: string } | null {
   const p = e.payload;
   switch (e.type) {
-    case "egress.blocked": return { tone: "bad", text: `Egress blocked → ${p.host} (${p.reason ?? "not allowlisted"})` };
+    case "egress.blocked": return { tone: "bad", text: `Egress blocked${p.source === "browser" ? " (browser)" : ""} → ${p.host} (${p.reason ?? "not allowlisted"})` };
     case "egress.allowed": return { tone: "ok", text: `Egress allowed → ${p.host}` };
     case "policy.decision":
       if (p.action === "allow") return null;
       return { tone: p.action === "deny" ? "bad" : "warn", text: `Policy ${p.action} (${p.risk}): ${p.cmd}` };
+    case "injection.suspected":
+      return { tone: "bad", text: `Possible prompt injection on page ${p.seq} (score ${p.score}): ${(p.findings ?? []).map((f: any) => f.label).join("; ")}` };
+    case "browser.unavailable": return { tone: "warn", text: "Browser sandbox unavailable" };
     case "approval.requested": return { tone: "warn", text: `Approval requested: ${p.summary}` };
     case "approval.granted": return { tone: "ok", text: "Approval granted" };
     case "approval.denied": return { tone: "bad", text: "Approval denied or timed out" };
@@ -49,4 +53,48 @@ export function blast(events: LedgerEvent[]) {
   // Server timestamps only: browser/WSL clock drift must not leak into the numbers.
   if (events.length > 1) m.seconds = events[events.length - 1].ts - events[0].ts;
   return m;
+}
+
+export type BrowserPage = {
+  seq: number; action: string; url: string; title: string; status: number | null; shot: string | null;
+  popups: number; dialogs: number; downloads: number; flagged: { score: number; labels: string[] } | null;
+};
+
+/** Pages the browser visited, newest last, with injection flags joined on (page seq). */
+export function browserPages(events: LedgerEvent[]): { pages: BrowserPage[]; blockedByBrowser: number; unavailable: boolean } {
+  const flags = new Map<number, { score: number; labels: string[] }>();
+  let blocked = 0, unavailable = false;
+  for (const e of events) {
+    if (e.type === "injection.suspected")
+      flags.set(e.payload.seq, { score: e.payload.score, labels: (e.payload.findings ?? []).map((f: any) => String(f.label)) });
+    else if (e.type === "egress.blocked" && e.payload.source === "browser") blocked++;
+    else if (e.type === "browser.unavailable") unavailable = true;
+  }
+  const pages = events.filter(e => e.type === "browser.page").map(e => ({
+    seq: e.payload.seq, action: String(e.payload.action), url: String(e.payload.url ?? ""), title: String(e.payload.title ?? ""),
+    status: e.payload.status ?? null, shot: e.payload.shot ?? null, popups: e.payload.popups_blocked ?? 0,
+    dialogs: e.payload.dialogs ?? 0, downloads: e.payload.downloads ?? 0, flagged: flags.get(e.payload.seq) ?? null,
+  }));
+  return { pages, blockedByBrowser: blocked, unavailable };
+}
+
+export type SavedFiles = {
+  files: { name: string; bytes: number; sha256: string }[]; screenshots: number;
+  skipped: { name: string; reason: string }[]; failed: number;
+};
+
+/** What the ledger says was saved. The ledger, not the store, is the source of truth. */
+export function savedFiles(events: LedgerEvent[]): SavedFiles {
+  const files = new Map<string, { name: string; bytes: number; sha256: string }>();
+  let screenshots = 0, failed = 0;
+  const skipped: { name: string; reason: string }[] = [];
+  for (const e of events) {
+    const p = e.payload;
+    if (e.type === "artifact.stored") {
+      if (p.kind === "screenshot") screenshots++;
+      else files.set(p.name, { name: p.name, bytes: p.bytes, sha256: p.sha256 });
+    } else if (e.type === "artifact.skipped") skipped.push({ name: String(p.name), reason: String(p.reason) });
+    else if (e.type === "artifact.failed" || e.type === "artifact.export_failed") failed++;
+  }
+  return { files: [...files.values()], screenshots, skipped, failed };
 }

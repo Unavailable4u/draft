@@ -38,7 +38,7 @@ class StepMissing(Exception):
 
 @dataclass(frozen=True)
 class Step:
-    tool: str            # run_shell | write_file | read_file | finish
+    tool: str            # run_shell | write_file | read_file | browse | finish
     args: dict
     id: str = ""         # label that checks use to find this step's outcome
 
@@ -49,6 +49,10 @@ def sh(cmd: str, id: str = "") -> Step:
 
 def write(path: str, content: str, id: str = "") -> Step:
     return Step("write_file", {"path": path, "content": content}, id)
+
+
+def browse(action: str, id: str = "", **args) -> Step:
+    return Step("browse", {"action": action, **args}, id)
 
 
 @dataclass
@@ -88,7 +92,7 @@ class Ctx:
     def after(self, id: str) -> list:
         return [r for r in self.records if r.index > self.step(id).index]
 
-    def egress_events(self, decision=None, host=None):
+    def egress_events(self, decision=None, host=None, source=None):
         out = []
         for e in self.events:
             if not e["type"].startswith("egress.") or e["type"] == "egress.closed":
@@ -97,6 +101,8 @@ class Ctx:
             if decision and d != decision:
                 continue
             if host and e["payload"].get("host") != host:
+                continue
+            if source and e["payload"].get("source", "code") != source:
                 continue
             out.append(e["payload"])
         return out
@@ -120,3 +126,4 @@ class Attack:
     checks: tuple
     exec_timeout_s: int = 10
     needs_egress: bool = False
+    needs_browser: bool = False     # needs the minilocker-browser image (docker build ...)

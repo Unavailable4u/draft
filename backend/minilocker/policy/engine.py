@@ -7,6 +7,7 @@ import posixpath
 import re
 import shlex
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 SYSTEM_DIRS = ("/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc", "/var", "/opt", "/boot",
                "/dev", "/proc", "/sys", "/root", "/home", "/srv", "/run", "/mnt", "/media")
@@ -77,10 +78,17 @@ class Decision:
     score: int
     reasons: list
     profile: str
+    tainted: bool = False     # untrusted web content was read earlier in this task
+    injected: bool = False    # ...and a page was flagged as a likely injection attempt
 
     def payload(self, cmd):
-        return {"cmd": cmd[:300], "action": self.action, "risk": self.risk,
-                "score": self.score, "reasons": self.reasons, "profile": self.profile}
+        p = {"cmd": cmd[:300], "action": self.action, "risk": self.risk,
+             "score": self.score, "reasons": self.reasons, "profile": self.profile}
+        if self.tainted:
+            p["tainted"] = True
+        if self.injected:
+            p["injected"] = True
+        return p
 
 
 def _under(path, dirs):
@@ -189,13 +197,59 @@ def analyze_shell(cmd):
     return score, reasons
 
 
+# After the agent has read untrusted web content, anything that reaches the network or touches
+# secrets deserves a second look: that is exactly what an injected instruction asks for. Plain
+# `pip install <name>` is deliberately not here (the default index is the agent's normal job).
+# A heuristic on the command text, so a payload hidden in a script file sails past it: the
+# sandbox and the egress allowlist are what contain that, as the Attack Lab shows.
+_TAINT_NET = re.compile(
+    r"\b(curl|wget|nc|ncat|netcat|ssh|scp|sftp|ftp|telnet|socat|rsync)\b|/dev/(tcp|udp)/|"
+    r"\bgit\s+(clone|fetch|pull|push|remote)\b|"
+    r"\b(urllib|urlopen|requests|httpx|http\.client|aiohttp|websockets?|socket)\b")
+_TAINT_SECRET = re.compile(
+    r"\b(printenv|env)\b|/proc/[^\s/]*/environ|\.env\b|\.ssh\b|id_rsa|\.aws\b|"
+    r"\b(credentials?|api[_-]?key|secrets?|tokens?|passwd|shadow)\b", re.I)
+TAINT_FLOOR, INJECTED_FLOOR = 40, 80   # medium: ask a human / high: strict profile denies
+
+
 class PolicyEngine:
     def __init__(self, profile="strict", budgets=None):
         self.profile = PROFILES[profile] if isinstance(profile, str) else profile
         self.budgets = budgets or Budgets()
 
-    def evaluate_shell(self, cmd):
-        score, reasons = analyze_shell(cmd)
+    def _decide(self, score, reasons, tainted=False, injected=False):
         risk = "high" if score >= 80 else "medium" if score >= 40 else "low"
         action = getattr(self.profile, f"on_{risk}")
-        return Decision(action, risk, score, reasons, self.profile.name)
+        return Decision(action, risk, score, reasons, self.profile.name, tainted, injected)
+
+    def evaluate_shell(self, cmd, tainted=False, injected=False):
+        score, reasons = analyze_shell(cmd)
+        flagged = False
+        if (tainted or injected) and (_TAINT_NET.search(cmd) or _TAINT_SECRET.search(cmd)):
+            floor = INJECTED_FLOOR if injected else TAINT_FLOOR
+            why = ("network or secret access right after a page was flagged as a prompt-injection attempt"
+                   if injected else "network or secret access after reading untrusted web content")
+            if score < floor:
+                score = floor
+            reasons = [why] + [r for r in reasons if r != why]
+            flagged = True
+        return self._decide(score, reasons, tainted and flagged, injected and flagged)
+
+    def evaluate_browse(self, action, url="", tainted=False, injected=False):
+        """Early-warning checks for a browser action. The worker re-validates the scheme and the
+        egress proxy decides what can actually be reached."""
+        score, reasons, because_injected = 0, [], False
+        if action == "goto":
+            try:
+                u = urlsplit(url or "")
+                scheme, creds = u.scheme.lower(), bool(u.username or u.password)
+            except ValueError:
+                scheme, creds = "", False
+            if scheme not in ("http", "https"):
+                score, reasons = 90, [f"{scheme or 'no'}: URLs are not allowed in the browser"]
+            elif creds:
+                score, reasons = 50, ["credentials embedded in the URL"]
+            elif injected:
+                score, because_injected = 50, True
+                reasons = ["navigation after a page was flagged as a prompt-injection attempt"]
+        return self._decide(score, reasons, tainted and because_injected, because_injected)

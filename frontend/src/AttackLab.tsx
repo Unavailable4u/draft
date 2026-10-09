@@ -44,7 +44,7 @@ function Summary({ lab }: { lab: AttackLabApi }) {
         {(tally.breached ?? 0) > 0 && <div className="text-red-400">{tally.breached} breached</div>}
         {(tally.inconclusive ?? 0) > 0 && <div className="text-amber-400">{tally.inconclusive} inconclusive</div>}
         {(tally.error ?? 0) > 0 && <div className="text-red-400">{tally.error} could not run</div>}
-        {list.length > runnable && <div className="text-zinc-500">{list.length - runnable} need the egress proxy</div>}
+        {list.length > runnable && <div className="text-zinc-500">{list.length - runnable} need the egress proxy or the browser image</div>}
       </div>
       <p className="max-w-sm text-xs text-zinc-500">
         Each attack is a scripted attacker driving the real agent loop, policy engine and Docker sandbox. No model is involved.
@@ -70,14 +70,16 @@ function Card({ a, run, selected, disabled, onSelect, onRun }: {
           <span aria-hidden className={`w-4 text-center font-semibold ${style?.text ?? "text-zinc-700"}`}>{run?.state === "running" ? "…" : style?.mark ?? "·"}</span>
           <span className="font-medium text-zinc-100">{a.title}</span>
           <span className={`ml-auto text-xs ${style?.text ?? "text-zinc-600"}`}>
-            {run?.state === "running" ? "running" : style ? style.label : a.available ? "not run" : "needs egress"}
+            {run?.state === "running" ? "running" : style ? style.label : a.available ? "not run" : a.needs_browser && !a.needs_egress ? "needs browser image" : "needs egress"}
           </span>
         </div>
         <p className="mt-1 line-clamp-2 pl-6 text-xs text-zinc-500">{a.summary}</p>
         <p className="mt-1 pl-6 text-xs text-zinc-600">{a.category} · {a.profile}</p>
       </button>
       <button onClick={onRun} disabled={disabled || !a.available || run?.state === "running"}
-        title={a.available ? undefined : "Needs the egress proxy, which is not attached"}
+        title={a.available ? undefined : a.needs_browser && !a.needs_egress
+          ? "Needs the browser image: docker build -f images/browser/Dockerfile -t minilocker-browser:latest ."
+          : "Needs the egress proxy, which is not attached"}
         aria-label={`Run ${a.title}`}
         className={`m-2 self-center rounded border border-zinc-700 px-3 py-1 text-xs text-zinc-200 hover:border-emerald-600 disabled:opacity-40 ${FOCUS}`}>
         {run?.state === "running" ? "Running…" : v ? "Run again" : "Run"}

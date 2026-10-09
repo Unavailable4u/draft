@@ -17,12 +17,17 @@ export type TaskSummary = {
   started: number | null; duration_s: number | null; events: number; tool_calls: number;
   egress_blocked: number; denied: number; approvals: number; verified: boolean;
 };
+export type ArtifactInfo = { name: string; kind: "file" | "screenshot"; bytes: number; sha256: string; event_id: number };
+export type ArtifactList = {
+  task_id: string; store_attached: boolean; artifacts: ArtifactInfo[];
+  skipped: { name: string; reason: string; bytes: number | null }[]; failed: { reason: string; name: string }[];
+};
 export type PendingApproval = { id: string; task_id: string; expires_at: number };
 
 export type AttackTry = { tool: string; text: string; content: string | null };
 export type AttackInfo = {
   name: string; title: string; category: string; profile: Profile; summary: string; expected: string;
-  needs_egress: boolean; available: boolean; tries: AttackTry[]; checks: string[];
+  needs_egress: boolean; needs_browser: boolean; available: boolean; tries: AttackTry[]; checks: string[];
 };
 export type CheckStatus = "pass" | "fail" | "unproven" | "skip";
 export type AttackCheck = { label: string; status: CheckStatus; detail: string; scope: "attack" | "always" };
@@ -83,7 +88,34 @@ export async function downloadReport(id: string, format: "json" | "html") {
 
 export const listAttacks = () =>
   fetch("/api/attacks", { headers: headers() })
-    .then(r => json<{ egress_attached: boolean; attacks: AttackInfo[] }>(r));
+    .then(r => json<{ egress_attached: boolean; browser_available: boolean; attacks: AttackInfo[] }>(r));
+
+export const listArtifacts = (taskId: string) =>
+  fetch(`/api/tasks/${taskId}/artifacts`, { headers: headers() }).then(r => json<ArtifactList>(r));
+
+const artifactUrl = (taskId: string, name: string) =>
+  `/api/tasks/${taskId}/artifacts/${name.split("/").map(encodeURIComponent).join("/")}`;
+
+/** Bytes plus the SHA-256 the server verified against the ledger. A 409 means the stored object
+ *  (or the ledger) failed verification: surfaced as an Error, never as content. */
+export async function fetchArtifact(taskId: string, name: string): Promise<{ blob: Blob; sha256: string | null }> {
+  const r = await fetch(artifactUrl(taskId, name), { headers: headers() });
+  if (!r.ok) {
+    let detail = r.statusText;
+    try { detail = (await r.json()).detail ?? detail; } catch { /* non-JSON error body */ }
+    throw new Error(`${r.status}: ${detail}`);
+  }
+  return { blob: await r.blob(), sha256: r.headers.get("x-artifact-sha256") };
+}
+
+export async function downloadArtifact(taskId: string, name: string) {
+  const { blob } = await fetchArtifact(taskId, name);
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name.split("/").pop() || "artifact";
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
 
 /** Blocking: resolves when the attack has finished (seconds, up to ~30 s). */
 export const runAttack = (name: string) =>

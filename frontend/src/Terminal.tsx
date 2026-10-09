@@ -17,6 +17,8 @@ function render(e: LedgerEvent): string {
       const a = parseArgs(p.args ?? "");
       if (p.tool === "run_shell") return `${G}$${X} ${clean(String(a?.cmd ?? p.args))}\n`;
       if (p.tool === "finish") return "";
+      if (p.tool === "browse")
+        return `${D}# browse ${clean(String(a?.action ?? ""))} ${clean(String(a?.url ?? a?.selector ?? ""))}${X}\n`;
       return `${D}# ${p.tool} ${clean(String(a?.path ?? ""))}${X}\n`;
     }
     case "tool.result": {
@@ -27,7 +29,9 @@ function render(e: LedgerEvent): string {
     }
     case "policy.decision":
       return p.action === "allow" ? "" : `${p.action === "deny" ? R : Y}[policy:${p.action}] ${clean((p.reasons ?? []).join("; "))}${X}\n`;
-    case "egress.blocked": return `${R}[egress blocked] ${clean(String(p.host))} (${clean(String(p.reason ?? ""))})${X}\n`;
+    case "injection.suspected":
+      return `${R}[injection suspected] page ${clean(String(p.seq))} score ${clean(String(p.score))}: ${clean((p.findings ?? []).map((f: any) => String(f.label)).join("; "))}${X}\n`;
+    case "egress.blocked": return `${R}[egress blocked${p.source === "browser" ? ": browser" : ""}] ${clean(String(p.host))} (${clean(String(p.reason ?? ""))})${X}\n`;
     case "approval.requested": return `${Y}[approval needed] ${clean(String(p.summary))}${X}\n`;
     case "approval.granted": return `${G}[approved]${X}\n`;
     case "approval.denied": return `${R}[denied]${X}\n`;

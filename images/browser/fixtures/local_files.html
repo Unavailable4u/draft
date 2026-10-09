@@ -1,0 +1,22 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Local file probe</title></head>
+<body>
+<h1>Local file probe</h1>
+<pre id="result">pending</pre>
+<iframe id="f" src="file:///etc/passwd" width="300" height="80"></iframe>
+<script>
+// Can a web page read local files of the machine it renders on? It must not.
+const R = {};
+async function probe(name, fn) {
+  try { R[name] = "READ:" + String(await fn()).slice(0, 40); }
+  catch (e) { R[name] = "BLOCKED:" + ((e && e.name) || "error"); }
+}
+(async () => {
+  await probe("fetch_passwd", () => fetch("file:///etc/passwd").then(r => r.text()));
+  await probe("xhr_environ", () => new Promise((res, rej) => { const x = new XMLHttpRequest(); x.open("GET", "file:///proc/self/environ"); x.onload = () => res(x.responseText); x.onerror = () => rej(new Error("xhr")); x.send(); }));
+  try { const d = document.getElementById("f").contentDocument; R.iframe = d ? "READ:" + d.body.innerText.slice(0, 40) : "BLOCKED:null"; }
+  catch (e) { R.iframe = "BLOCKED:" + e.name; }
+  try { window.location = "file:///etc/passwd"; } catch (e) {}
+  document.getElementById("result").textContent = "BROWSER_RESULT " + JSON.stringify(R);
+})();
+</script>
+</body></html>
