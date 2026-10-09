@@ -3,6 +3,7 @@ import os
 import sys
 
 from minilocker.agent.loop import run_task
+from minilocker.config import load_and_report
 from minilocker.egress.manager import EgressManager
 from minilocker.llm.client import LLMClient
 from minilocker.policy.approvals import console_approver
@@ -10,6 +11,7 @@ from minilocker.policy.engine import PolicyEngine
 
 
 def main():
+    load_and_report()
     if len(sys.argv) < 2:
         sys.exit('usage: python -m minilocker.cli "your task"   (MINILOCKER_PROFILE=strict|observe)')
 

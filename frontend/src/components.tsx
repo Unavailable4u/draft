@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { LedgerEvent, Profile, Report } from "./api";
 import { listApprovals, resolveApproval } from "./api";
-import { blast, describe, toolLine } from "./derive";
+import { blast, describe, groupLines, toolLine } from "./derive";
 import { Md } from "./Md";
 import type { Tone } from "./derive";
 
@@ -108,7 +108,7 @@ const UNMEASURED = ["filesystem", "secrets", "compute"];
 
 export function BlastPanel({ events, report, running }: { events: LedgerEvent[]; report: Report | null; running: boolean }) {
   const m = blast(events);
-  const feed = events.map(e => ({ e, d: describe(e) })).filter(x => x.d && x.e.type !== "task.end").reverse().slice(0, 60);
+  const feed = groupLines(events);
   return (
     <div className="flex h-full flex-col">
       <div className="grid grid-cols-2 gap-2 p-3">
@@ -134,7 +134,11 @@ export function BlastPanel({ events, report, running }: { events: LedgerEvent[];
           : <span className="text-zinc-500">Ledger chain is verified when the task completes</span>}
       </div>
       <ul className="flex-1 space-y-1 overflow-y-auto border-t border-zinc-800 p-3 text-xs">
-        {feed.map(({ e, d }) => <li key={e.id} className={TONE[d!.tone]}>{d!.text}</li>)}
+        {feed.map(r => (
+          <li key={r.key} className={TONE[r.tone]}>
+            {r.text}{r.count > 1 && <span className="ml-1 rounded bg-zinc-800 px-1 text-zinc-300">×{r.count}</span>}
+          </li>
+        ))}
       </ul>
     </div>
   );

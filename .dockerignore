@@ -6,3 +6,6 @@
 frontend/dist
 runs
 .env
+**/.env
+**/.env.*
+!**/.env.example

@@ -1,5 +1,10 @@
 import os
+
 from openai import OpenAI
+
+from minilocker.config import load_and_report
+
+load_and_report()
 
 c = OpenAI(base_url=os.environ["LLM_BASE_URL"], api_key=os.environ["LLM_API_KEY"])
 tools = [{"type": "function", "function": {

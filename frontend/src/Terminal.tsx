@@ -44,6 +44,7 @@ export function TerminalView({ events }: { events: LedgerEvent[] }) {
   const el = useRef<HTMLDivElement>(null);
   const term = useRef<XTerm | null>(null);
   const done = useRef(0);
+  const seen = useRef(new Map<string, { n: number; label: string }>());   // repeated egress blocks
 
   useEffect(() => {
     const t = new XTerm({ fontSize: 13, convertEol: true, disableStdin: true, scrollback: 5000,
@@ -52,7 +53,7 @@ export function TerminalView({ events }: { events: LedgerEvent[] }) {
     t.loadAddon(fit);
     t.open(el.current!);
     fit.fit();
-    term.current = t; done.current = 0;
+    term.current = t; done.current = 0; seen.current.clear();
     const ro = new ResizeObserver(() => { try { fit.fit(); } catch { /* hidden tab: zero size */ } });
     ro.observe(el.current!);
     return () => { ro.disconnect(); t.dispose(); term.current = null; };
@@ -61,9 +62,24 @@ export function TerminalView({ events }: { events: LedgerEvent[] }) {
   useEffect(() => {
     const t = term.current;
     if (!t) return;
-    if (events.length < done.current) { t.reset(); done.current = 0; }   // new task
+    if (events.length < done.current) { t.reset(); done.current = 0; seen.current.clear(); }   // new task
+    // A page that loads 30 images from one blocked host is one red line plus a count, not 30 lines.
+    const flush = () => {
+      for (const v of seen.current.values()) {
+        if (v.n) { t.write(`${D}  … ${v.n} more blocked request(s) → ${v.label}${X}\n`); v.n = 0; }
+      }
+    };
     for (; done.current < events.length; done.current++) {
-      const s = render(events[done.current]);
+      const ev = events[done.current];
+      if (ev.type === "egress.blocked") {
+        const key = `${ev.payload.source}|${ev.payload.host}|${ev.payload.reason}`;
+        const hit = seen.current.get(key);
+        if (hit) { hit.n++; continue; }
+        seen.current.set(key, { n: 0, label: `${clean(String(ev.payload.host))} (${clean(String(ev.payload.reason ?? ""))})` });
+      } else if (ev.type === "tool.result" || ev.type === "task.end") {
+        flush();
+      }
+      const s = render(ev);
       if (s) t.write(s);
     }
   }, [events]);

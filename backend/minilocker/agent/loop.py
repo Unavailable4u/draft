@@ -77,6 +77,11 @@ def hardening_of(box):
         return None
 
 
+MAX_EMPTY_NUDGES = 2
+EMPTY_REPLY_NUDGE = ("Your last reply was empty. If the task is complete, call `finish` with a short "
+                     "summary of what you did; otherwise call the next tool.")
+
+
 def run_task(task, llm, max_steps=12, max_tokens=40000, exec_timeout=30,
              on_event=None, ledger_dir="runs", egress=None, policy=None, approver=None,
              task_id=None, artifacts=None, browser_fixtures=False):
@@ -235,6 +240,7 @@ def run_task(task, llm, max_steps=12, max_tokens=40000, exec_timeout=30,
                 + bt.render_page(res, min(b.max_output_chars, 6000), found["findings"] if found["suspected"] else None))
 
     try:
+        empty_replies = 0
         for steps in range(1, b.max_steps + 1):
             if time.time() - t0 > b.task_deadline_s:
                 status = "halted:deadline"
@@ -247,6 +253,14 @@ def run_task(task, llm, max_steps=12, max_tokens=40000, exec_timeout=30,
                                         "text": clip(msg.content or "", 500)})
             messages.append(_msg_to_dict(msg))
             if not msg.tool_calls:
+                if not msg.content and empty_replies < MAX_EMPTY_NUDGES:
+                    # Some models (seen: gpt-oss) answer a tool result with an empty message instead
+                    # of calling `finish`. The work is usually done; ask once or twice before giving up.
+                    empty_replies += 1
+                    messages.pop()          # an empty assistant turn is rejected by some providers
+                    messages.append({"role": "user", "content": EMPTY_REPLY_NUDGE})
+                    log("agent", "agent.nudge", {"reason": "empty_reply", "n": empty_replies})
+                    continue
                 status = "finished" if msg.content else "halted:no_tool_call"
                 summary = msg.content or ""
                 break

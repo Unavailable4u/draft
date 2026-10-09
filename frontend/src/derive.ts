@@ -37,6 +37,21 @@ export function describe(e: LedgerEvent): { tone: Tone; text: string } | null {
   }
 }
 
+/** Notable events as display rows, newest first, with identical lines merged into one row and a count.
+ *  A page that pulls 30 images from a blocked host is one line "x30", not 30 red lines. */
+export function groupLines(events: LedgerEvent[], limit = 60) {
+  const rows: { key: number; tone: Tone; text: string; count: number }[] = [];
+  const at = new Map<string, number>();
+  for (const e of [...events].reverse()) {
+    const d = describe(e);
+    if (!d || e.type === "task.end") continue;
+    const i = at.get(d.text);
+    if (i !== undefined) rows[i].count++;
+    else { at.set(d.text, rows.length); rows.push({ key: e.id, tone: d.tone, text: d.text, count: 1 }); }
+  }
+  return rows.slice(0, limit);
+}
+
 export function blast(events: LedgerEvent[]) {
   const m = { allowed: 0, blocked: 0, hosts: new Set<string>(), decisions: 0, denied: 0, asked: 0,
     created: 0, destroyed: 0, forced: 0, seconds: 0 };
