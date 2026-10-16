@@ -215,7 +215,7 @@ export function AttackLab({ lab, onOpenReport }: { lab: AttackLabApi; onOpenRepo
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <Summary lab={lab} />
-      <div className="grid min-h-0 flex-1 grid-cols-[400px_1fr]">
+      <div className="grid min-h-0 flex-1 grid-cols-[400px_minmax(0,1fr)]">
         <ul className="min-h-0 space-y-2 overflow-y-auto border-r border-zinc-800 p-3">
           {attacks.map(a => <Card key={a.name} a={a} run={runs[a.name]} selected={a.name === cur.name} disabled={lab.running}
             onSelect={() => setSel(a.name)} onRun={() => { setSel(a.name); lab.run(a.name); }} />)}

@@ -15,9 +15,13 @@ PORT = 3128
 class EgressManager:
     internal_network = INTERNAL
 
-    def __init__(self, allowed_hosts, image="python:3.12-slim"):
+    def __init__(self, allowed_hosts, image="python:3.12-slim", packaged=False):
+        """packaged=True: the proxy code ships inside `image` (module minilocker.egress.proxy_server).
+        Required when the control plane itself runs in a container: bind-mounting a file from
+        this process's filesystem would name a path that does not exist on the Docker host."""
         self.client = docker.from_env()
         self.allowed = list(allowed_hosts)
+        self.packaged = packaged
         self.image = image
         self.container = None
 
@@ -32,11 +36,16 @@ class EgressManager:
         self.stop()
         self._ensure_network(INTERNAL, True)
         self._ensure_network(EXTERNAL, False)
-        script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "proxy_server.py")
+        if self.packaged:
+            code = {"command": ["python", "-u", "-m", "minilocker.egress.proxy_server"]}
+        else:
+            script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "proxy_server.py")
+            code = {"command": ["python", "-u", "/proxy.py"],
+                    "volumes": {script: {"bind": "/proxy.py", "mode": "ro"}}}
         self.container = self.client.containers.run(
-            self.image, ["python", "-u", "/proxy.py"], name=PROXY, detach=True,
+            self.image, name=PROXY, detach=True,
             network=EXTERNAL,
-            volumes={script: {"bind": "/proxy.py", "mode": "ro"}},
+            **code,
             environment={"ALLOWED_HOSTS": ",".join(self.allowed)},
             user="65534:65534", read_only=True, cap_drop=["ALL"],
             security_opt=["no-new-privileges"], pids_limit=64, mem_limit="128m",

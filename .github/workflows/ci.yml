@@ -1,0 +1,114 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: backend tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install -r backend/requirements.txt
+      - name: Unit and integration tests (everything except the attack suite)
+        working-directory: backend
+        run: python -m pytest -q -m "not attacks"
+
+  attacks:
+    name: attack suite and real browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install -r backend/requirements.txt
+      - uses: docker/setup-buildx-action@v4
+      - name: Build the browser sandbox image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: images/browser/Dockerfile
+          tags: minilocker-browser:latest
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Real browser tests
+        working-directory: backend
+        run: python -m pytest -q tests/test_browser_integration.py
+      - name: Attack Lab, all attacks against real sandboxes
+        working-directory: backend
+        run: python -m pytest -q -m attacks
+
+  frontend:
+    name: frontend build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+
+  deploy-files:
+    name: deployment files
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Compose file renders, and refuses to start without its secrets
+        run: |
+          printf '%s\n' 'LLM_BASE_URL=https://example.invalid/v1' 'LLM_MODEL=ci' 'LLM_API_KEY=ci' \
+            'MINILOCKER_API_TOKEN=ci' 'MINILOCKER_S3_ACCESS_KEY=ci' 'MINILOCKER_S3_SECRET_KEY=ci' > "$RUNNER_TEMP/ci.env"
+          docker compose -f deploy/docker-compose.yml --env-file "$RUNNER_TEMP/ci.env" config -q
+          if docker compose -f deploy/docker-compose.yml --env-file /dev/null config -q 2>/dev/null; then
+            echo "compose accepted a missing-secrets environment" >&2
+            exit 1
+          fi
+      - name: Caddyfile validates, for a port and for a domain
+        run: |
+          for site in :80 example.org; do
+            docker run --rm -e SITE_ADDRESS="$site" -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+              caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile
+          done
+      - name: shellcheck
+        run: shellcheck deploy/*.sh
+
+  stack:
+    name: full stack bootstrap
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Seed deploy/.env with a placeholder model key, since the smoke test uses no model
+        run: printf '%s\n' 'LLM_BASE_URL=https://example.invalid/v1' 'LLM_MODEL=ci' 'LLM_API_KEY=ci-not-a-real-key' > deploy/.env
+      - name: Bootstrap, build every image, start the stack, run the containment smoke test
+        run: ./deploy/bootstrap.sh
+      - name: Stack logs
+        if: failure()
+        run: docker compose -f deploy/docker-compose.yml logs --no-color --tail 200

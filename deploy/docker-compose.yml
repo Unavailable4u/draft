@@ -1,0 +1,131 @@
+# MiniLocker, production-style stack.   docker compose -f deploy/docker-compose.yml up -d
+# Settings come from deploy/.env (see env.production.example); ./deploy/bootstrap.sh prepares it.
+#
+#   internet -> web (Caddy) -> api -> docker-proxy -> host Docker      api -> storage (S3)
+#
+# The API never touches the raw Docker socket: it talks to a proxy that allows only the API families it
+# needs. Sandboxes and the egress proxy are created by the API as siblings; they are not part of this file.
+name: minilocker
+
+services:
+  docker-proxy:
+    image: ${SOCKET_PROXY_IMAGE:-tecnativa/docker-socket-proxy:latest}
+    restart: unless-stopped
+    environment:
+      # allowed: what minilocker/sandbox, /egress and /attacks actually call
+      CONTAINERS: "1"
+      NETWORKS: "1"
+      IMAGES: "1"
+      EXEC: "1"
+      POST: "1"
+      VERSION: "1"
+      PING: "1"
+      # denied (the proxy's default, spelled out so a reader does not have to look it up)
+      BUILD: "0"
+      VOLUMES: "0"
+      SYSTEM: "0"
+      INFO: "0"
+      EVENTS: "0"
+      SECRETS: "0"
+      SERVICES: "0"
+      SWARM: "0"
+      NODES: "0"
+      TASKS: "0"
+      CONFIGS: "0"
+      PLUGINS: "0"
+      AUTH: "0"
+      COMMIT: "0"
+      DISTRIBUTION: "0"
+      SESSION: "0"
+      GRPC: "0"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [control]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 128m
+
+  storage:
+    image: ${STORAGE_IMAGE:-rustfs/rustfs:latest}
+    restart: unless-stopped
+    command: ["/data"]
+    environment:
+      RUSTFS_ACCESS_KEY: ${MINILOCKER_S3_ACCESS_KEY:?set MINILOCKER_S3_ACCESS_KEY in deploy/.env}
+      RUSTFS_SECRET_KEY: ${MINILOCKER_S3_SECRET_KEY:?set MINILOCKER_S3_SECRET_KEY in deploy/.env}
+    volumes:
+      - storage:/data
+    networks: [data]
+
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.api
+    image: minilocker-api:latest
+    restart: unless-stopped
+    depends_on: [docker-proxy, storage]
+    environment:
+      DOCKER_HOST: tcp://docker-proxy:2375
+      MINILOCKER_PROXY_IMAGE: minilocker-api:latest
+      MINILOCKER_BROWSER_IMAGE: ${MINILOCKER_BROWSER_IMAGE:-minilocker-browser:latest}
+      MINILOCKER_API_TOKEN: ${MINILOCKER_API_TOKEN:?set MINILOCKER_API_TOKEN in deploy/.env}
+      LLM_BASE_URL: ${LLM_BASE_URL:?set LLM_BASE_URL in deploy/.env}
+      LLM_MODEL: ${LLM_MODEL:?set LLM_MODEL in deploy/.env}
+      LLM_API_KEY: ${LLM_API_KEY:?set LLM_API_KEY in deploy/.env}
+      MINILOCKER_PROFILE: ${MINILOCKER_PROFILE:-strict}
+      MINILOCKER_ALLOW: ${MINILOCKER_ALLOW:-pypi.org,files.pythonhosted.org}
+      MINILOCKER_MAX_TASKS: ${MINILOCKER_MAX_TASKS:-2}
+      MINILOCKER_APPROVAL_TIMEOUT: ${MINILOCKER_APPROVAL_TIMEOUT:-60}
+      MINILOCKER_S3_ENDPOINT: http://storage:9000
+      MINILOCKER_S3_ACCESS_KEY: ${MINILOCKER_S3_ACCESS_KEY:?set MINILOCKER_S3_ACCESS_KEY in deploy/.env}
+      MINILOCKER_S3_SECRET_KEY: ${MINILOCKER_S3_SECRET_KEY:?set MINILOCKER_S3_SECRET_KEY in deploy/.env}
+    volumes:
+      - runs:/app/runs
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 1g
+    pids_limit: 256
+    networks: [control, data, edge]      # edge gives outbound internet (the model API); control and data do not
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.web
+    image: minilocker-web:latest
+    restart: unless-stopped
+    depends_on: [api]
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+      - "${HTTPS_PORT:-443}:443/udp"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m
+    networks: [edge]
+
+networks:
+  control:
+    internal: true      # api <-> docker-proxy only; no route out
+  data:
+    internal: true      # api <-> storage only; no route out
+  edge: {}              # web <-> api, and the api's route to the model provider
+
+volumes:
+  runs: {}
+  storage: {}
+  caddy_data: {}
+  caddy_config: {}

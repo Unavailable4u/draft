@@ -27,7 +27,7 @@ function Workspace({ t }: { t: TaskApi }) {
   const [tab, setTab] = useState<Tab>("terminal");
   const hidden = (x: Tab) => (tab === x ? "" : "hidden");
   return (
-    <div className="grid min-h-0 flex-1 grid-cols-[320px_1fr_340px]">
+    <div className="grid min-h-0 flex-1 grid-cols-[320px_minmax(0,1fr)_340px]">
       <section className="flex min-h-0 flex-col border-r border-zinc-800">
         <TaskForm running={t.running} error={t.error} onRun={t.start} />
         <StepStream events={t.events} />

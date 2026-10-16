@@ -45,18 +45,26 @@ def _default_llm_factory():
 def _default_egress():
     from minilocker.egress.manager import EgressManager
     allow = os.environ.get("MINILOCKER_ALLOW", "pypi.org,files.pythonhosted.org").split(",")
-    return EgressManager(allow).start()
+    image = os.environ.get("MINILOCKER_PROXY_IMAGE")      # set when this process runs in a container
+    return EgressManager(allow, **({"image": image, "packaged": True} if image else {})).start()
 
 
-def _default_artifacts():
-    """(store, error). Configured-but-unreachable is reported, not hidden: the Files tab shows why."""
+def _default_artifacts(tries=15, delay_s=2.0, sleep=None):
+    """(store, error). Configured-but-unreachable is reported, not hidden: the Files tab shows why.
+    Retries for ~30 s: in a compose stack the object store routinely starts after the API."""
+    import sys
+    import time
     from minilocker.artifacts import S3ArtifactStore
-    try:
-        return S3ArtifactStore.from_env(), None
-    except Exception as e:
-        import sys
-        print(f"[minilocker] artifact store unavailable: {type(e).__name__}: {e}", file=sys.stderr)
-        return None, f"{type(e).__name__}"
+    sleep = sleep or time.sleep
+    for attempt in range(1, tries + 1):
+        try:
+            return S3ArtifactStore.from_env(), None
+        except Exception as e:
+            print(f"[minilocker] artifact store unavailable ({attempt}/{tries}): {type(e).__name__}: {e}",
+                  file=sys.stderr)
+            if attempt == tries:
+                return None, f"{type(e).__name__}"
+            sleep(delay_s)
 
 
 def _default_attack_runner():

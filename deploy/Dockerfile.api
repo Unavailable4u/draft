@@ -1,0 +1,24 @@
+# The control plane (FastAPI). Also the image the egress proxy runs from (MINILOCKER_PROXY_IMAGE):
+# the proxy is a module of this package, so no file from this container is ever bind-mounted.
+# Build context: the repository root.
+FROM python:3.12-slim-bookworm
+
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PIP_NO_CACHE_DIR=1 HOME=/tmp
+
+RUN useradd --uid 10001 --user-group --no-create-home --shell /usr/sbin/nologin app \
+ && mkdir -p /app/runs && chown app:app /app/runs
+WORKDIR /app
+
+COPY backend/requirements.txt /tmp/requirements.txt
+# runtime dependencies only: the test tools (pytest, moto) stay out of the image
+RUN grep -vE '^(pytest|moto)' /tmp/requirements.txt > /tmp/runtime.txt \
+ && pip install -r /tmp/runtime.txt && rm /tmp/requirements.txt /tmp/runtime.txt
+
+COPY backend/minilocker ./minilocker
+# the egress proxy container runs this code as uid 65534
+RUN chmod -R a+rX /app/minilocker
+
+ENV MINILOCKER_HOST=0.0.0.0 MINILOCKER_LEDGER_DIR=/app/runs
+USER 10001:10001
+EXPOSE 8000
+CMD ["python", "-m", "minilocker.api"]

@@ -1,0 +1,32 @@
+{
+	admin off
+}
+
+# SITE_ADDRESS=:80            plain HTTP (local / by IP)
+# SITE_ADDRESS=example.org    automatic HTTPS (DNS must point here; ports 80 and 443 reachable)
+{$SITE_ADDRESS::80} {
+	encode zstd gzip
+
+	# "?" = only if the upstream did not set it, so the API's own headers (for example the ones that
+	# make agent-produced files download-only) are never overwritten.
+	header {
+		?X-Content-Type-Options nosniff
+		?X-Frame-Options DENY
+		?Referrer-Policy no-referrer
+		?Strict-Transport-Security "max-age=31536000"
+		?Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+		-Server
+	}
+
+	handle /api/* {
+		reverse_proxy api:8000 {
+			flush_interval -1   # server-sent events must not be buffered
+		}
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

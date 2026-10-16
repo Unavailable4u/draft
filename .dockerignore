@@ -9,3 +9,5 @@ runs
 **/.env
 **/.env.*
 !**/.env.example
+**/runs
+**/.pytest_cache
