@@ -251,6 +251,11 @@ def run_task(task, llm, max_steps=12, max_tokens=40000, exec_timeout=30,
             msg = llm.chat(messages, TOOLS)
             log("llm", "llm.response", {"tokens_total": llm.total_tokens,
                                         "text": clip(msg.content or "", 500)})
+            sv = getattr(msg, "salvaged", None)
+            if isinstance(sv, dict):
+                # The model did not emit these calls natively: they were repaired or read out of text (see
+                # llm/toolcalls.py). They run through the same policy as any other call; this makes it visible.
+                log("llm", "llm.salvaged", {k: sv[k] for k in ("how", "calls", "source") if k in sv})
             messages.append(_msg_to_dict(msg))
             if not msg.tool_calls:
                 if not msg.content and empty_replies < MAX_EMPTY_NUDGES:

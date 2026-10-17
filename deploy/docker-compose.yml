@@ -70,6 +70,7 @@ services:
       LLM_BASE_URL: ${LLM_BASE_URL:?set LLM_BASE_URL in deploy/.env}
       LLM_MODEL: ${LLM_MODEL:?set LLM_MODEL in deploy/.env}
       LLM_API_KEY: ${LLM_API_KEY:?set LLM_API_KEY in deploy/.env}
+      LLM_TOOL_MODE: ${LLM_TOOL_MODE:-native}
       MINILOCKER_PROFILE: ${MINILOCKER_PROFILE:-strict}
       MINILOCKER_ALLOW: ${MINILOCKER_ALLOW:-pypi.org,files.pythonhosted.org}
       MINILOCKER_MAX_TASKS: ${MINILOCKER_MAX_TASKS:-2}

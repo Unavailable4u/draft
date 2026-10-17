@@ -1,0 +1,6 @@
+# Files that run on Linux (in CI, in a container, on the VM) must keep LF line endings whatever the committer's
+# platform: a CRLF shebang line fails with "bad interpreter", and a CRLF Caddyfile or Dockerfile misparses.
+# backend/tests/test_ci_hygiene.py checks this file and the index.
+*.sh        text eol=lf
+Dockerfile* text eol=lf
+Caddyfile   text eol=lf

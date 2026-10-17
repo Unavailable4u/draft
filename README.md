@@ -117,6 +117,7 @@ exercise the property it targets. Run them in the UI, or in CI-style with `pytes
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY` | none | Any OpenAI-compatible chat endpoint. Needed to run tasks (not attacks). |
+| `LLM_TOOL_MODE` | `native` | `native` uses the provider's tool calling. `json` describes the tools in the prompt and parses one JSON object per step, for a model with no (or unreliable) tool calling. See [Choosing a model](#choosing-a-model). |
 | `MINILOCKER_API_TOKEN` | empty (no auth) | When set, every `/api` call needs `Authorization: Bearer <token>`. Always set it on a shared host. |
 | `MINILOCKER_ALLOW` | `pypi.org,files.pythonhosted.org` | Hosts the sandboxes and browser may reach, subdomains included. Keep it short. |
 | `MINILOCKER_PROFILE` | `strict` | Policy profile for the CLI. The API takes the profile per task. |
@@ -147,6 +148,29 @@ The agent's budgets, set per task in `minilocker/policy/engine.py`:
 | `max_output_chars` | 2000 |
 | `max_denials` | 5 |
 
+## Choosing a model
+
+Models differ in how faithfully they follow the tool-calling contract, so the client tolerates what it safely can:
+arguments wrapped in a code fence or with a trailing comma are repaired, a call the model wrote as text (Hermes, Llama,
+Kimi, gpt-oss and ReAct syntaxes, or bare JSON) is recovered, and a call the provider rejected is recovered from what
+the model wrote. It never completes a truncated value, never promotes prose that merely quotes a call, and ignores
+calls that appear only in the model's reasoning. A recovered call goes through the same policy and sandbox as any
+other, and the ledger records an `llm.salvaged` event for it.
+
+To compare models before relying on one, run the bake-off. It needs no Docker, only the endpoint settings:
+
+```bash
+cd backend
+python -m minilocker.llm.bakeoff --models openai/gpt-oss-120b,another/model --runs 5 --mode both
+python -m minilocker.llm.bakeoff --list      # what the probes check
+```
+
+Each probe is one step of the real agent (the real prompt, tools and client), repeated `--runs` times. *usable* is the
+share that did what was asked; *clean* is the share that did so through the mode's own channel with no repair and no
+retry, so the gap is what the fallbacks carry. `--mode both` also tries `json` mode, and the last line names the
+setting to use. Raw results are written to `runs/bakeoff-<time>.json`. One step is not a task: a model that passes 95%
+of steps finishes only about 6 ten-step tasks in 10, so treat a PASS as "worth running whole scenarios on".
+
 ## Tests and CI
 
 ```bash
@@ -163,6 +187,7 @@ the code (attack list, settings, budgets, hardening numbers, links).
 ## Repository layout
 
 - `backend/minilocker/agent/`: the agent loop and its tools.
+- `backend/minilocker/llm/`: the OpenAI-compatible client, tolerant tool-call parsing, and the model bake-off.
 - `backend/minilocker/policy/`: risk rules, profiles, approvals, the injection scanner.
 - `backend/minilocker/sandbox/`: the hardened code sandbox and the browser sandbox with its in-container worker.
 - `backend/minilocker/egress/`: the allowlisting proxy and its network manager.

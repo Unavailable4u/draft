@@ -34,6 +34,7 @@ sandbox by design); an attacker with a kernel or container-runtime zero-day; an 
 | Policy | Regex risk rules. `strict` denies high-risk commands and asks a human about medium-risk ones. Approvals have a timeout and default to denial. A run halts after 5 denials, 12 steps, 40,000 tokens or 300 seconds. | `deny_then_bypass` |
 | Web content | Page text is fenced as untrusted data with a random nonce, invisible Unicode is stripped, and a scanner flags injection attempts. After a page is read, network and secret-touching commands need approval; after a flagged page, `strict` denies them. | `hostile_page_injection` |
 | Browser | Chromium in its own container (non-root, read-only, capabilities dropped, no route out). The worker accepts `http(s)` only. | `browser_local_file_access`, `hostile_page_active_content` |
+| Model output | A tool call is only ever read from text that consists of a call: prose that quotes one (a summary of a hostile page) is not a call, calls inside reasoning are ignored, a truncated value is never completed, one bad call in a reply discards the whole reply, and unknown tools are dropped. A recovered call goes through the same policy and sandbox as any other and is recorded as `llm.salvaged`. | unit tests (`test_toolcalls.py`), not an attack |
 | Record | Every event is chained by SHA-256 over canonical JSON. The Blast Radius report is computed from the ledger and shows whether the chain verifies; artifact downloads are refused if it does not. | every attack re-verifies the chain |
 
 ## Trade-offs and weak points
