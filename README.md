@@ -157,6 +157,10 @@ the model wrote. It never completes a truncated value, never promotes prose that
 calls that appear only in the model's reasoning. A recovered call goes through the same policy and sandbox as any
 other, and the ledger records an `llm.salvaged` event for it.
 
+In `json` mode an empty reply is retried with a specific nudge. Some models (seen: gpt-oss on Groq) sometimes write the
+right call at the end of their *reasoning* and leave the message empty; that call is never acted on, since reasoning is
+where a model quotes hostile text, so the client asks again instead.
+
 To compare models before relying on one, run the bake-off. It needs no Docker, only the endpoint settings:
 
 ```bash
@@ -166,8 +170,8 @@ python -m minilocker.llm.bakeoff --list      # what the probes check
 ```
 
 Each probe is one step of the real agent (the real prompt, tools and client), repeated `--runs` times. *usable* is the
-share that did what was asked; *clean* is the share that did so through the mode's own channel with no repair and no
-retry, so the gap is what the fallbacks carry. `--mode both` also tries `json` mode, and the last line names the
+share that did what was asked; *clean* is the share that did so through the mode's own channel (a tool call, a JSON object, or a plain-text
+answer where that is correct) with no repair and no retry, so the gap is what the fallbacks carry. `--mode both` also tries `json` mode, and the last line names the
 setting to use. Raw results are written to `runs/bakeoff-<time>.json`. One step is not a task: a model that passes 95%
 of steps finishes only about 6 ten-step tasks in 10, so treat a PASS as "worth running whole scenarios on".
 

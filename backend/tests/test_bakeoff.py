@@ -249,3 +249,59 @@ def test_in_json_mode_a_bare_json_object_is_clean_but_in_native_mode_it_is_a_res
     as_native, _ = scripted([reply(content=text)])
     b = bo.run_attempt(as_native, PROBE["list_files"])
     assert (b.ok, b.how, b.syntax) == (True, "salvaged", "json") and bo.summarize([b])["clean"] == 0.0
+
+
+# ---------------------------------------------------------------------------------- diagnosis
+
+from types import SimpleNamespace as NS  # noqa: E402
+
+
+def choice_reply(content=None, finish="stop", reasoning=None, calls=None):
+    m = NS(content=content, tool_calls=calls, **({"reasoning": reasoning} if reasoning is not None else {}))
+    return NS(usage=None, choices=[NS(message=m, finish_reason=finish)])
+
+
+def test_a_correct_plain_text_answer_is_clean_not_rescued():
+    # gpt-oss answers "what is the number" in prose; that is correct, and nothing was repaired or retried
+    a = attempt(how="text", probe="answer_after_result")
+    s = bo.summarize([a, attempt()])
+    assert s["clean"] == 1.0 and s["rescued"] == 0
+    assert bo.summarize([attempt(ok=False, how="text")])["clean"] == 0.0         # a wrong text answer is not clean
+    assert bo.summarize([attempt(how="text", retries=1)])["clean"] == 0.0        # nor is one that needed a retry
+
+
+def test_an_empty_reply_says_what_the_provider_sent():
+    client, _ = scripted([choice_reply(content="", finish="stop", reasoning="x" * 312)])
+    a = bo.run_attempt(client, PROBE["list_files"])
+    assert a.how == "empty" and not a.ok
+    assert "finish_reason=stop" in a.reason and "content_chars=0" in a.reason and "reasoning_chars=312" in a.reason
+    assert a.detail["tool_calls"] == 0 and a.detail["finish_reason"] == "stop"
+
+
+def test_a_passing_attempt_keeps_no_detail_but_a_retried_one_does():
+    ok, _ = scripted([choice_reply(calls=[NS(id="c", type="function", function=NS(name="run_shell", arguments='{"cmd": "ls"}'))])])
+    assert bo.run_attempt(ok, PROBE["list_files"]).detail is None
+    retried, _ = scripted([rejected("nothing usable here"), reply(calls=[("run_shell", '{"cmd": "ls"}')])])
+    a = bo.run_attempt(retried, PROBE["list_files"])
+    assert a.ok and a.retries == 1 and a.detail["failed_generation"] == "nothing usable here"
+
+
+def test_the_rejected_text_is_kept_even_when_the_task_is_then_answered_wrongly():
+    client, _ = scripted([rejected('<function=finish>{"summary": '), reply(calls=[("read_file", '{"path": "/workspace/notes.txt"}')])])
+    a = bo.run_attempt(client, PROBE["answer_after_result"])
+    assert not a.ok and a.retries == 1 and "failed_generation='<function=finish>" in a.reason
+
+
+def test_a_secret_never_reaches_the_diagnosis():
+    client, _ = scripted([rejected("key sk-secret-123456 leaked in model text")])
+    client.max_retries = 0
+    a = bo.run_attempt(client, PROBE["list_files"], secrets=["sk-secret-123456"])
+    assert a.how == "error" and "sk-secret" not in json.dumps(bo.asdict(a))
+
+
+def test_the_table_shows_the_empty_count(tmp_path):
+    import io
+    out = io.StringIO()
+    bo.main(["--models", "m", "--runs", "1", "--out", str(tmp_path / "r.json")],
+            make_client=lambda model, mode: Scripted({p.id: msg() for p in bo.PROBES}), out=out)
+    assert "| empty |" in out.getvalue() and "| 6 |" in out.getvalue()

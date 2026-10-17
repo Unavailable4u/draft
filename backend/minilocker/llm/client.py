@@ -14,6 +14,9 @@ BAD_TOOL_CALL_RETRIES = 3
 TOOL_MODES = ("native", "json")
 RETRY_NUDGE = {"role": "user", "content": "Your last tool call had invalid JSON arguments and was "
                                           "rejected. Call the tool again with valid JSON arguments."}
+EMPTY_NUDGE = {"role": "user", "content": "Your last reply was empty. Write the JSON object for your next action "
+                                          "(or call `finish` if the task is complete) in the message itself, "
+                                          "not only in your reasoning."}
 
 
 def _failed_generation(err):
@@ -55,6 +58,7 @@ class LLMClient:
         )
         self.usage = {"prompt": 0, "completion": 0, "calls": 0}
         self.stats = Counter()
+        self.last_raw = {}      # what the provider sent for the latest chat(): for diagnosis, never persisted
 
     def chat(self, messages, tools=None):
         json_mode = bool(tools) and self.tool_mode == "json"
@@ -68,6 +72,7 @@ class LLMClient:
                 kwargs["tools"] = tools
                 kwargs["tool_choice"] = "auto"
         bad_calls = 0
+        self.last_raw = {}
         for attempt in range(self.max_retries + 1):
             try:
                 r = self.client.chat.completions.create(**kwargs)
@@ -87,6 +92,9 @@ class LLMClient:
                 # rejects it with 400 tool_use_failed. It usually says what the model wrote: if that is a clear
                 # call, use it. Otherwise sampling is random, so retry with a nudge instead of crashing the
                 # task. Any other 400 is a real bug.
+                failed = _failed_generation(e)
+                if failed:
+                    self.last_raw["failed_generation"] = failed[:300]
                 got = self._rescue(e, tools)
                 if got is not None:
                     return got
@@ -102,39 +110,62 @@ class LLMClient:
                 self.usage["prompt"] += r.usage.prompt_tokens
                 self.usage["completion"] += r.usage.completion_tokens
             self.usage["calls"] += 1
-            msg, usable = self._accept(r.choices[0].message, tools)
-            if usable:
+            self._note(r.choices[0])
+            msg, nudge = self._accept(r.choices[0].message, tools)
+            if nudge is None:
                 return msg
             bad_calls += 1
             if bad_calls > BAD_TOOL_CALL_RETRIES:
                 return msg          # out of tries: the loop decides what an unusable reply means
             print(f"[llm] unusable tool call, retry {bad_calls}/{BAD_TOOL_CALL_RETRIES}", file=sys.stderr)
             self.stats["retries"] += 1
-            kwargs = {**kwargs, "messages": self._nudged(base, json_mode)}
+            kwargs = {**kwargs, "messages": self._nudged(base, json_mode, nudge)}
         raise RuntimeError("the model did not give a usable reply within the retry limit")
+
+    def _note(self, choice):
+        """Shape of the latest reply (lengths and finish reason, plus the start of the text): what is needed to
+        tell an empty reply caused by the model from one caused by the provider."""
+        m = getattr(choice, "message", None)
+        content = getattr(m, "content", None)
+        reasoning = getattr(m, "reasoning", None) or getattr(m, "reasoning_content", None)
+        self.last_raw.update(
+            finish_reason=getattr(choice, "finish_reason", None),
+            content_chars=len(content) if isinstance(content, str) else 0,
+            reasoning_chars=len(reasoning) if isinstance(reasoning, str) else 0,
+            tool_calls=len(getattr(m, "tool_calls", None) or []),
+            content_head=content[:160] if isinstance(content, str) else None,
+            reasoning_tail=reasoning[-160:] if isinstance(reasoning, str) and reasoning else None)
 
     # -- tolerant handling of the reply ----------------------------------------------------------
 
     def _accept(self, msg, tools):
-        """-> (message, usable). An unusable reply is worth another try; if the tries run out it is returned
-        as is (a native call with broken arguments) or as an empty reply (JSON mode)."""
+        """-> (message, nudge). nudge is None when the reply is usable; otherwise it is the message to retry
+        with. If the tries run out the message is returned as is (a native call with broken arguments) or as an
+        empty reply (JSON mode)."""
         if not tools:
-            return msg, True
+            return msg, None
         content = getattr(msg, "content", None)
         if getattr(msg, "tool_calls", None):
             fixed, status = toolcalls.normalize_native_calls(msg, tools)
             if status == "unparseable":
                 self.stats["unparseable"] += 1
-                return msg, False
+                return msg, RETRY_NUDGE
             self.stats["native_ok" if status == "ok" else "repaired"] += 1
-            return fixed, True
+            return fixed, None
         got = toolcalls.salvage(content, tools)
         if got:
-            return self._salvaged(got, "content"), True
-        if self.tool_mode == "json" and toolcalls.looks_like_json_call(content):
-            self.stats["json_unparseable"] += 1
-            return toolcalls.make_message(None, []), False
-        return msg, True
+            return self._salvaged(got, "content"), None
+        if self.tool_mode == "json":
+            if toolcalls.looks_like_json_call(content):
+                self.stats["json_unparseable"] += 1
+                return toolcalls.make_message(None, []), RETRY_NUDGE
+            if not (isinstance(content, str) and content.strip()):
+                # Seen with gpt-oss on Groq: the right call written at the end of the *reasoning* and the message
+                # left empty. Reasoning is where a model quotes and weighs hostile text, so a call found there is
+                # never acted on (toolcalls rule 2); an empty message is not a valid answer in JSON mode: ask again.
+                self.stats["json_empty"] += 1
+                return toolcalls.make_message(None, []), EMPTY_NUDGE
+        return msg, None
 
     def _rescue(self, err, tools):
         failed = _failed_generation(err)
@@ -154,12 +185,12 @@ class LLMClient:
                                       {"how": got.how, "calls": len(got.calls), "source": source})
 
     @staticmethod
-    def _nudged(base, json_mode):
-        """The history plus the retry nudge. A JSON-mode history may already end on a user message, and some
+    def _nudged(base, json_mode, nudge=RETRY_NUDGE):
+        """The history plus a retry nudge. A JSON-mode history may already end on a user message, and some
         providers insist on alternating roles, so there the nudge joins it."""
         if json_mode and base and base[-1].get("role") == "user":
-            return [*base[:-1], {**base[-1], "content": f"{base[-1]['content']}\n\n{RETRY_NUDGE['content']}"}]
-        return [*base, RETRY_NUDGE]
+            return [*base[:-1], {**base[-1], "content": f"{base[-1]['content']}\n\n{nudge['content']}"}]
+        return [*base, nudge]
 
     def _sleep_or_raise(self, attempt, err, wait):
         if attempt >= self.max_retries:

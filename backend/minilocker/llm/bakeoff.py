@@ -9,7 +9,8 @@ does what the task asked, not merely when it parses. Nothing here needs Docker.
 How to read the numbers:
 
   * `usable` is the share of probes that passed. `clean` is the share that passed through the mode's own channel
-    (a native tool call, or in `json` mode a JSON object) with no repair and no retry. The gap between them is
+    (a native tool call, in `json` mode a JSON object, or a plain-text answer where the probe accepts one) with
+    no repair and no retry. The gap between them is
     what the fallbacks are carrying: a model that is 100% usable but 40% clean works, but only because of them.
   * `mode`: `native` uses the provider's tool-calling; `json` describes the tools in the prompt and parses one
     JSON object per step (for a model that has no tool calling, or a bad one). `--mode both` runs each model both
@@ -199,12 +200,13 @@ PROBES = [
 class Attempt:
     probe: str
     ok: bool
-    how: str                 # native | json | repaired | salvaged | rescued | text | empty | error
+    how: str                 # native | json | text | repaired | salvaged | rescued | empty | error
     syntax: str
     reason: str
     seconds: float
     retries: int
     tokens: int
+    detail: dict | None = None      # what the provider sent, kept for failures and retries only
 
 
 def redact(text, secrets):
@@ -212,6 +214,15 @@ def redact(text, secrets):
         if s and len(s) >= 6:
             text = text.replace(s, "***")
     return text
+
+
+def _explain(detail) -> str:
+    if not detail:
+        return ""
+    bits = [f"{k}={detail[k]}" for k in ("finish_reason", "content_chars", "reasoning_chars") if k in detail]
+    if detail.get("failed_generation"):
+        bits.append(f"failed_generation={detail['failed_generation'][:100]!r}")
+    return " [" + " ".join(bits) + "]" if bits else ""
 
 
 def run_attempt(client, probe, secrets=()) -> Attempt:
@@ -229,8 +240,12 @@ def run_attempt(client, probe, secrets=()) -> Attempt:
     if how == "salvaged" and syntax == "json" and getattr(client, "tool_mode", "native") == "json":
         how = "json"                # in JSON mode a bare JSON object is the protocol working, not a rescue
     ok, reason = probe.check(msg)
-    return Attempt(probe.id, bool(ok), how, syntax, "" if ok else reason, secs,
-                   client.stats["retries"] - retries0, client.total_tokens - tokens0)
+    retries = client.stats["retries"] - retries0
+    raw = dict(getattr(client, "last_raw", None) or {})
+    detail = {k: (redact(v, secrets) if isinstance(v, str) else v) for k, v in raw.items()} \
+        if raw and (not ok or retries) else None
+    return Attempt(probe.id, bool(ok), how, syntax, "" if ok else redact(reason, secrets) + _explain(detail), secs,
+                   retries, client.total_tokens - tokens0, detail)
 
 
 def run_config(client, probes, runs, secrets=(), delay=0.0, progress=None) -> tuple:
@@ -254,7 +269,7 @@ def run_config(client, probes, runs, secrets=(), delay=0.0, progress=None) -> tu
 def summarize(attempts, aborted=False) -> dict:
     n = len(attempts)
     ok = sum(a.ok for a in attempts)
-    clean = sum(1 for a in attempts if a.ok and a.how in ("native", "json") and a.retries == 0)
+    clean = sum(1 for a in attempts if a.ok and a.how in ("native", "json", "text") and a.retries == 0)
     secs = sorted(a.seconds for a in attempts)
     usable = ok / n if n else 0.0
     by_probe = {}
@@ -308,13 +323,13 @@ def recommend(results) -> dict:
 
 def render(results) -> str:
     pct = lambda x: f"{round(x * 100)}%"
-    lines = ["| model | mode | usable | clean | rescued | errors | p50 | p95 | tokens | verdict |",
-             "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
+    lines = ["| model | mode | usable | clean | rescued | empty | errors | p50 | p95 | tokens | verdict |",
+             "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
     for r in results:
         s = r["summary"]
         note = " (aborted)" if s["aborted"] else ""
         lines.append(f"| {r['model']} | {r['mode']} | {pct(s['usable'])} | {pct(s['clean'])} | {s['rescued']} | "
-                     f"{s['errors']} | {s['p50_s']}s | {s['p95_s']}s | {s['tokens']} | {s['verdict']}{note} |")
+                     f"{s['empty']} | {s['errors']} | {s['p50_s']}s | {s['p95_s']}s | {s['tokens']} | {s['verdict']}{note} |")
     ids = [p.id for p in PROBES if any(p.id in r["summary"]["by_probe"] for r in results)]
     cols = [f"{r['model']}@{r['mode']}" for r in results]
     lines += ["", "Passed per probe:", "", "| probe | " + " | ".join(cols) + " |", "| --- |" + " --- |" * len(cols)]
