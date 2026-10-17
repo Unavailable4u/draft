@@ -350,3 +350,34 @@ def test_a_crashing_exporter_cannot_stop_the_sandbox_being_destroyed(tmp_path, m
     monkeypatch.setattr("minilocker.agent.loop.export_workspace", boom)
     r, evs = run([[call("finish", summary="x")]], tmp_path, artifacts=MemoryArtifactStore(), task_id="0123abcd")
     assert FakeSandbox.made[0].destroyed and of(evs, "sandbox.destroyed") and r["status"] == "finished"
+
+
+# ---- optional arguments filled with placeholders -----------------------------------------------------
+from minilocker.agent import browse_tool as bt  # noqa: E402
+
+
+def test_a_real_selector_wins_over_a_placeholder_ref():
+    # JSON-mode models fill every optional parameter; the worker prefers `ref`, so "ref": 0 would hijack the click
+    assert bt.clean_params({"action": "click", "selector": "#buy", "ref": 0}) == {"selector": "#buy"}
+    assert bt.clean_params({"selector": "#buy", "ref": 7}) == {"selector": "#buy"}
+
+
+def test_a_ref_is_kept_when_there_is_no_real_selector():
+    assert bt.clean_params({"ref": 0}) == {"ref": 0}
+    assert bt.clean_params({"ref": 3, "selector": ""}) == {"ref": 3, "selector": ""}   # blank: nothing to prefer
+    assert bt.clean_params({"ref": 3, "selector": "   "}) == {"ref": 3, "selector": "   "}
+
+
+def test_what_is_shown_is_what_runs():
+    for args in ({"selector": "#buy", "ref": 0}, {"ref": 2, "selector": ""}, {"ref": 1}, {"url": "https://a.example", "ref": 0}):
+        p = bt.clean_params(args)
+        target = bt.target_of(p)
+        assert target == (p.get("url") or p.get("selector") or f"ref {p['ref']}")
+        assert not ("ref" in p and "selector" in p and p["selector"].strip())     # never both: nothing is ambiguous
+
+
+def test_a_click_with_both_reaches_the_browser_with_the_selector_only(tmp_path):
+    FakeBrowser.pages["current"] = {"text": "x"}
+    full = dict(action="click", selector="#buy", ref=0, text="", submit=False, wait_ms=2000)   # what gpt-oss sends
+    run([[call("browse", **full)], [call("finish", summary="x")]], tmp_path)
+    assert FakeBrowser.made[0].calls == [("click", {"selector": "#buy", "text": "", "wait_ms": 2000})]

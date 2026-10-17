@@ -509,6 +509,8 @@ def tool_protocol(tools) -> str:
         lines.append(f"- {f['name']}({', '.join(parts)}): {desc}")
     return ("You have no native tool-calling channel here. To act, reply with ONLY one JSON object and nothing "
             'else, in exactly this form:\n{"tool": "<tool name>", "arguments": {<arguments>}}\n'
+            "Include only the arguments a step needs: leave optional ones out rather than filling them with "
+            "placeholders such as an empty string, 0 or false.\n"
             "The result of the tool arrives in the next message. When the task is complete, call `finish`.\n"
             "Tools (* marks a required argument):\n" + "\n".join(lines))
 

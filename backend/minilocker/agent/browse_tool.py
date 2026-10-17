@@ -35,7 +35,11 @@ def clean_params(args: dict) -> dict:
     for k, n in (("url", 2000), ("selector", 300), ("text", 2000)):
         if isinstance(args.get(k), str):
             p[k] = args[k][:n]
-    if _is_int(args.get("ref")):
+    # The browser worker resolves `ref` before `selector`, and target_of() (what the ledger and an approval show)
+    # prefers the selector. A model that fills every optional parameter sends `"ref": 0` next to a real selector,
+    # and the click would land on element 0 while the record named the selector. A real selector therefore wins:
+    # the ref is only kept when there is no selector to take its place.
+    if _is_int(args.get("ref")) and not (p.get("selector") or "").strip():
         p["ref"] = args["ref"]
     if args.get("submit") is True:
         p["submit"] = True

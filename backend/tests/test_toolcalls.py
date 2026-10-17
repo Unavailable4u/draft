@@ -341,3 +341,7 @@ def test_a_tool_result_cannot_close_its_own_fence():
 def test_looks_like_json_call():
     assert tc.looks_like_json_call('{"tool": ') and tc.looks_like_json_call('```json\n{') and tc.looks_like_json_call("[{")
     assert not tc.looks_like_json_call("All done.") and not tc.looks_like_json_call(None)
+
+
+def test_the_protocol_tells_the_model_to_omit_optional_arguments():
+    assert "leave optional ones out" in tc.tool_protocol(TOOLS)
