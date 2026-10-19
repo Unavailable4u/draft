@@ -7,6 +7,7 @@ import uuid
 from collections import Counter
 
 from minilocker.agent import browse_tool as bt
+from minilocker.agent.hooks import Check, CheckContext, write_files
 from minilocker.artifacts import export_workspace
 from minilocker.ledger.chain import Ledger
 from minilocker.policy import injection
@@ -77,6 +78,17 @@ def hardening_of(box):
         return None
 
 
+def _run_check(verify, ctx, log) -> Check:
+    """A broken check is a failed check with a reason, never a crashed task."""
+    try:
+        got = verify(ctx)
+        check = got if isinstance(got, Check) else Check(False, [f"the check returned {type(got).__name__}, not a Check"])
+    except Exception as e:
+        check = Check(False, [f"the check itself failed: {type(e).__name__}: {str(e)[:200]}"])
+    log("check", "scenario.check", check.payload())
+    return check
+
+
 MAX_EMPTY_NUDGES = 2
 EMPTY_REPLY_NUDGE = ("Your last reply was empty. If the task is complete, call `finish` with a short "
                      "summary of what you did; otherwise call the next tool.")
@@ -84,17 +96,24 @@ EMPTY_REPLY_NUDGE = ("Your last reply was empty. If the task is complete, call `
 
 def run_task(task, llm, max_steps=12, max_tokens=40000, exec_timeout=30,
              on_event=None, ledger_dir="runs", egress=None, policy=None, approver=None,
-             task_id=None, artifacts=None, browser_fixtures=False):
+             task_id=None, artifacts=None, browser_fixtures=False, files=None, verify=None):
     """With a policy, its budgets win over the max_* / exec_timeout arguments.
-    Without one, behavior is unchanged (no checks, no approvals)."""
+    Without one, behavior is unchanged (no checks, no approvals).
+
+    `files` ({relative path: text}) is written into /workspace before the agent starts. `verify(CheckContext)` is
+    trusted code that judges the outcome inside the agent's own sandbox once the agent has stopped, before the
+    sandbox is destroyed; its verdict is written to the ledger as `scenario.check` and returned as `check`."""
     b = policy.budgets if policy is not None else Budgets(
         max_steps=max_steps, max_tokens=max_tokens, exec_timeout_s=exec_timeout)
     task_id = task_id or uuid.uuid4().hex[:8]
     os.makedirs(ledger_dir, exist_ok=True)
     ledger = Ledger(task_id, os.path.join(ledger_dir, f"{task_id}.jsonl"))
 
+    events = []                      # every ledger event so far: what a `verify` hook reads
+
     def log(actor, type_, payload=None):
         ev = ledger.append(actor, type_, payload)
+        events.append(ev)
         if on_event:
             on_event(ev)
 
@@ -112,8 +131,9 @@ def run_task(task, llm, max_steps=12, max_tokens=40000, exec_timeout=30,
     denials = 0
     bsb = None                       # browser sandbox: created on the first browse call
     tainted = injected = False       # untrusted web content read / a page flagged as an injection
-    page_seq = shots = 0
+    page_seq = shots = pages = 0
     status, summary, steps = "halted:max_steps", "", 0
+    check = None
 
     def flush_egress():
         if egress is None:
@@ -174,7 +194,7 @@ def run_task(task, llm, max_steps=12, max_tokens=40000, exec_timeout=30,
         return ""
 
     def do_browse(action, params):
-        nonlocal bsb, tainted, injected, page_seq, shots
+        nonlocal bsb, tainted, injected, page_seq, shots, pages
         if bsb is None:
             try:
                 bsb = BrowserSandbox(egress=egress, **({"fixtures": True} if browser_fixtures else {}))
@@ -236,10 +256,27 @@ def run_task(task, llm, max_steps=12, max_tokens=40000, exec_timeout=30,
         shown = str(res.get("url", ""))
         if res.get("status") == 403 and shown.startswith("http://") and "127.0.0.1" not in shown[:20]:
             notes += " [plain http:// is refused by the egress proxy: use the https:// URL]"
-        return (f"ok: {action}{notes}\n"
-                + bt.render_page(res, min(b.max_output_chars, 6000), found["findings"] if found["suspected"] else None))
+        body = bt.render_page(res, min(b.max_output_chars, 6000), found["findings"] if found["suspected"] else None)
+        if shot:
+            notes += f" [screenshot saved: {shot}]"      # the model can only cite what it can name
+        if artifacts is not None and pages < bt.MAX_SHOTS:
+            # The text the model was actually shown, next to its screenshot: together they are the receipt for
+            # anything it later claims from this page, and a check can confirm a claim against them.
+            name_ = f"pages/{page_seq:03d}.txt"
+            try:
+                data = body.encode("utf-8")
+                info = artifacts.put(task_id, name_, data)
+                log("artifact", "artifact.stored", {"name": name_, "kind": "file", "bytes": info["bytes"],
+                                                    "sha256": info["sha256"]})
+                pages += 1
+            except Exception as e:
+                log("artifact", "artifact.failed", {"name": name_, "error": type(e).__name__})
+        return f"ok: {action}{notes}\n" + body
 
     try:
+        if files:
+            n = write_files(sb, files)
+            log("sandbox", "workspace.seeded", {"files": sorted(files)[:40], "count": len(files), "bytes": n})
         empty_replies = 0
         for steps in range(1, b.max_steps + 1):
             if time.time() - t0 > b.task_deadline_s:
@@ -367,6 +404,8 @@ def run_task(task, llm, max_steps=12, max_tokens=40000, exec_timeout=30,
                     break
             if done:
                 break
+        if verify is not None:
+            check = _run_check(verify, CheckContext(sb, events, artifacts, task_id, status, summary), log)
     except Exception as e:
         # Without this, the finally block below would stamp a crash with the default
         # status ("halted:max_steps"): a false statement in a tamper-evident ledger.
@@ -392,6 +431,9 @@ def run_task(task, llm, max_steps=12, max_tokens=40000, exec_timeout=30,
         log("agent", "task.end", {"status": status, "steps": steps, "summary": clip(summary, 800)})
 
     ok, detail = ledger.verify()
-    return {"task_id": task_id, "status": status, "steps": steps, "summary": summary,
-            "tokens": llm.total_tokens, "denials": denials, "ledger_verified": ok,
-            "ledger": detail, "ledger_path": ledger.path}
+    out = {"task_id": task_id, "status": status, "steps": steps, "summary": summary,
+           "tokens": llm.total_tokens, "denials": denials, "ledger_verified": ok,
+           "ledger": detail, "ledger_path": ledger.path}
+    if check is not None:
+        out["check"] = check.payload()
+    return out

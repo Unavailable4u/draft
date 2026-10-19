@@ -285,7 +285,10 @@ def test_only_real_jpegs_are_stored_and_the_count_is_capped(tmp_path, monkeypatc
     _, evs = run([[call("browse", action="goto", url=f"https://a.example/{i}")] for i in (1, 2, 3, 4)]
                  + [[call("finish", summary="x")]], tmp_path, artifacts=store, task_id="0123abcd")
     assert [p["shot"] for p in of(evs, "browser.page")] == ["screenshots/001.jpg", None, "screenshots/003.jpg", None]
-    assert sorted(k for k in store.objects) == ["tasks/0123abcd/screenshots/001.jpg", "tasks/0123abcd/screenshots/003.jpg"]
+    assert sorted(k for k in store.objects if "/screenshots/" in k) == [
+        "tasks/0123abcd/screenshots/001.jpg", "tasks/0123abcd/screenshots/003.jpg"]
+    assert sorted(k for k in store.objects if "/pages/" in k) == [                  # the page text has its own cap
+        "tasks/0123abcd/pages/001.txt", "tasks/0123abcd/pages/002.txt"]
 
 
 def test_a_failing_store_costs_the_screenshot_not_the_task(tmp_path):
@@ -381,3 +384,41 @@ def test_a_click_with_both_reaches_the_browser_with_the_selector_only(tmp_path):
     full = dict(action="click", selector="#buy", ref=0, text="", submit=False, wait_ms=2000)   # what gpt-oss sends
     run([[call("browse", **full)], [call("finish", summary="x")]], tmp_path)
     assert FakeBrowser.made[0].calls == [("click", {"selector": "#buy", "text": "", "wait_ms": 2000})]
+
+
+
+# ---- receipts: the model can name a page's screenshot, and what it read is kept ------------------------------
+def test_the_model_is_told_the_screenshot_name_outside_the_fence(tmp_path):
+    FakeBrowser.pages["https://a.example/"] = {"text": "hello"}
+    _, evs = run([[call("browse", action="goto", url="https://a.example/")], [call("finish", summary="x")]], tmp_path,
+                 artifacts=MemoryArtifactStore(), task_id="0123abcd")
+    head = results(evs)[0].split("[UNTRUSTED")[0]
+    assert head.startswith("ok: goto") and "[screenshot saved: screenshots/001.jpg]" in head
+    assert of(evs, "browser.page")[0]["shot"] == "screenshots/001.jpg"           # the name it was given is real
+
+
+def test_no_screenshot_name_is_given_when_none_was_stored(tmp_path):
+    FakeBrowser.pages["https://a.example/"] = {"text": "hello"}
+    _, evs = run([[call("browse", action="goto", url="https://a.example/")], [call("finish", summary="x")]], tmp_path)
+    assert "screenshot saved" not in results(evs)[0]
+
+
+def test_the_text_the_model_saw_is_stored_and_committed_to_the_ledger(tmp_path):
+    import hashlib
+    store = MemoryArtifactStore()
+    FakeBrowser.pages["https://a.example/"] = {"text": "The tower was completed in 1889."}
+    _, evs = run([[call("browse", action="goto", url="https://a.example/")], [call("finish", summary="x")]], tmp_path,
+                 artifacts=store, task_id="0123abcd")
+    seen = results(evs)[0].split("\n", 1)[1]                      # everything after the "ok: goto ..." line
+    stored = store.get("0123abcd", "pages/001.txt").decode()
+    assert stored == seen and "completed in 1889" in stored
+    ev = next(e["payload"] for e in evs if e["type"] == "artifact.stored" and e["payload"]["name"] == "pages/001.txt")
+    assert ev["kind"] == "file" and ev["sha256"] == hashlib.sha256(stored.encode()).hexdigest()
+
+
+def test_a_screenshot_action_does_not_store_page_text(tmp_path):
+    store = MemoryArtifactStore()
+    FakeBrowser.pages["https://a.example/"] = {"text": "hello"}
+    run([[call("browse", action="goto", url="https://a.example/")], [call("browse", action="screenshot")],
+         [call("finish", summary="x")]], tmp_path, artifacts=store, task_id="0123abcd")
+    assert sorted(k.split("/", 2)[2] for k in store.objects if "/pages/" in k) == ["pages/001.txt"]

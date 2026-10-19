@@ -175,6 +175,36 @@ answer where that is correct) with no repair and no retry, so the gap is what th
 setting to use. Raw results are written to `runs/bakeoff-<time>.json`. One step is not a task: a model that passes 95%
 of steps finishes only about 6 ten-step tasks in 10, so treat a PASS as "worth running whole scenarios on".
 
+## Measuring whether the agent finishes the job
+
+A single step that works is not a task that finishes. Two scenarios run a whole task with the real agent, judge the
+outcome with a check the model never sees, and repeat it so you get a rate and not an anecdote:
+
+```bash
+cd backend
+python -m minilocker.scenarios --list
+python -m minilocker.scenarios --scenario fix_repo --runs 10     # offline: no network needed
+python -m minilocker.scenarios --scenario research --runs 10     # needs Docker to reach wikipedia.org
+```
+
+- **fix_repo**: a small pricing library with three independent bugs and a failing `unittest` suite. The check puts the
+  original tests back, runs hidden tests with other inputs, and counts a test only if its own runner reported a pass, so
+  editing or deleting tests, special-casing the examples, or a library that exits early all fail.
+- **research**: three questions answered from Wikipedia, each line citing the screenshot it came from. A claim counts only
+  if that screenshot was really taken, is of the right article, matches the hash the ledger recorded, and the saved text of
+  that page contains the answer. Every browse result names its screenshot, and the text the model read is kept as
+  `pages/NNN.txt` next to it.
+
+Each run gets a fresh sandbox, a fresh model client and its own ledger, under the policy profile you pass
+(`--profile strict` by default). The report gives the pass count with its 95% interval (9 of 10 is consistent with anything
+from about 60% to 98%), the share that finished cleanly, the median cost, the recovered tool calls and nudges the model
+needed, and the reasons runs failed. Ledgers and the evidence for each run are written under `runs/scenarios/`.
+The check guards against shortcuts a model takes by mistake or optimism; it does not defend against code written to fool
+the check from inside the process under test.
+
+`research` starts its own egress proxy, which replaces a running MiniLocker proxy: stop the stack first. Ten whole runs
+use a lot of tokens, so on a rate-limited key add `--delay`.
+
 ## Tests and CI
 
 ```bash
@@ -191,6 +221,7 @@ the code (attack list, settings, budgets, hardening numbers, links).
 ## Repository layout
 
 - `backend/minilocker/agent/`: the agent loop and its tools.
+- `backend/minilocker/scenarios/`: the hero scenarios, their success checks and the runner that repeats them.
 - `backend/minilocker/llm/`: the OpenAI-compatible client, tolerant tool-call parsing, and the model bake-off.
 - `backend/minilocker/policy/`: risk rules, profiles, approvals, the injection scanner.
 - `backend/minilocker/sandbox/`: the hardened code sandbox and the browser sandbox with its in-container worker.
