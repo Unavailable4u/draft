@@ -24,7 +24,10 @@ place where a prompt injection could be promoted into an action, so the parser i
   4. A truncated value is never "completed". Missing closing braces are added only when the text stops right
      after a finished string or container, so `{"cmd": "rm -rf /tmp/x"` is repaired but `{"cmd": "rm -rf /tm`
      is not (completing that string could change what the command does).
-  5. Unknown tool names are dropped, and a salvaged call goes through the same policy, approval and sandbox as
+  5. A call whose arguments break the tool's declared schema (wrong type, missing required argument, value not in
+     the enum) is not salvaged. A provider rejects such a call for exactly that reason, and acting on it anyway would
+     undo the rejection.
+  6. Unknown tool names are dropped, and a salvaged call goes through the same policy, approval and sandbox as
      any other. The agent loop also writes an `llm.salvaged` ledger event, so a report shows which calls were
      recovered rather than emitted natively.
 """
@@ -35,7 +38,7 @@ import hashlib
 import json
 import re
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import SimpleNamespace
 
 MAX_CALLS = 8          # calls taken from one reply
@@ -220,10 +223,11 @@ class Schema:
     names: tuple
     props: dict               # name -> set of parameter names
     required: dict            # name -> list of required parameter names
+    specs: dict = field(default_factory=dict)      # name -> {parameter: its JSON-schema dict}
 
 
 def schema_of(tools) -> Schema:
-    names, props, required = [], {}, {}
+    names, props, required, specs = [], {}, {}, {}
     for t in tools or []:
         f = t.get("function") if isinstance(t, dict) else None
         if not isinstance(f, dict) or not isinstance(f.get("name"), str):
@@ -233,8 +237,57 @@ def schema_of(tools) -> Schema:
         p = params.get("properties")
         names.append(n)
         props[n] = set(p) if isinstance(p, dict) else set()
+        specs[n] = {k: v for k, v in p.items() if isinstance(v, dict)} if isinstance(p, dict) else {}
         required[n] = [r for r in (params.get("required") or []) if isinstance(r, str)]
-    return Schema(tuple(names), props, required)
+    return Schema(tuple(names), props, required, specs)
+
+
+_JSON_TYPE = {
+    "string": lambda v: isinstance(v, str),
+    "integer": lambda v: (isinstance(v, int) and not isinstance(v, bool)) or (isinstance(v, float) and v.is_integer()),
+    "number": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
+    "boolean": lambda v: isinstance(v, bool),
+    "array": lambda v: isinstance(v, list),
+    "object": lambda v: isinstance(v, dict),
+}
+
+
+def _kind(v) -> str:
+    return ("null" if v is None else "boolean" if isinstance(v, bool) else "integer" if isinstance(v, int) else
+            "number" if isinstance(v, float) else "string" if isinstance(v, str) else
+            "array" if isinstance(v, list) else "object" if isinstance(v, dict) else type(v).__name__)
+
+
+def validate_args(name, args, sc: Schema, *, check_required: bool = True) -> str | None:
+    """None when `args` fit the declared schema of tool `name`; otherwise a short reason, fit to show the model.
+
+    Providers that validate a call reject one whose arguments have the wrong type, and the rejected text is exactly
+    what the salvage code sees, so a call that fails here must not be salvaged. Providers that do not validate pass
+    such a call straight through, and the agent loop would crash on it (a list where a command string belongs):
+    the loop therefore checks too and answers the model with this reason instead.
+
+    An unknown tool is not judged here. Unknown arguments are ignored, as the tools ignore them, and `null` means
+    "not given". `check_required=False` is for a caller that already copes with a missing argument."""
+    if name not in sc.props:
+        return None
+    if not isinstance(args, dict):
+        return "the arguments must be a JSON object"
+    specs = sc.specs.get(name, {})
+    for k, v in args.items():
+        spec = specs.get(k)
+        if spec is None or v is None:
+            continue
+        want = spec.get("type")
+        wants = [want] if isinstance(want, str) else [w for w in (want or []) if isinstance(w, str)]
+        if wants and not any(_JSON_TYPE.get(w, lambda _: True)(v) for w in wants):
+            return f"argument `{k}` must be of type {' or '.join(wants)}, not {_kind(v)}"
+        if isinstance(spec.get("enum"), list) and v not in spec["enum"]:
+            return f"argument `{k}` must be one of: {', '.join(map(str, spec['enum']))}"
+    if check_required:
+        missing = [r for r in sc.required.get(name, []) if args.get(r) is None]
+        if missing:
+            return "missing required argument(s): " + ", ".join(missing)
+    return None
 
 
 _PREFIX = re.compile(r"^(?:functions?|tools?|default_api)[.:]", re.I)
@@ -432,6 +485,8 @@ def salvage(text, tools, *, strict: bool = True) -> Salvage | None:
         calls, spans = fmt(text, sc)
         if not calls or len(calls) > MAX_CALLS:
             continue
+        if any(validate_args(c.name, c.args, sc) for c in calls):
+            continue                       # a call that breaks its tool's schema is not salvaged (rule 3 applies)
         if strict:
             ok, pre = _consists_of_calls(text, spans, allow_preamble)
             if not ok:

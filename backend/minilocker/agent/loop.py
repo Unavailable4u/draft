@@ -10,6 +10,7 @@ from minilocker.agent import browse_tool as bt
 from minilocker.agent.hooks import Check, CheckContext, write_files
 from minilocker.artifacts import export_workspace
 from minilocker.ledger.chain import Ledger
+from minilocker.llm import toolcalls
 from minilocker.policy import injection
 from minilocker.policy.engine import Budgets
 from minilocker.sandbox.browser import BrowserSandbox, BrowserUnavailable
@@ -47,6 +48,8 @@ TOOLS = [
         "name": "finish", "description": "End the task with a summary.",
         "parameters": {"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"]}}},
 ]
+
+_SCHEMA = toolcalls.schema_of(TOOLS)
 
 
 def clip(s: str, n: int = 2000) -> str:
@@ -317,17 +320,25 @@ def run_task(task, llm, max_steps=12, max_tokens=40000, exec_timeout=30,
                 key = (name, json.dumps(args, sort_keys=True))
                 seen[key] += 1
                 log("agent", "tool.call", {"tool": name, "args": clip(json.dumps(args), 800)})
+                # The model's arguments are untrusted input. A provider that does not validate them can hand over
+                # a list where a command belongs, and that used to crash the whole task inside the policy engine.
+                # Say what is wrong and let the model correct it. (A missing argument keeps its old meaning, and
+                # `browse` already sanitises its own arguments field by field, so only its shape is checked.)
+                problem = (None if name == "browse" and isinstance(args, dict)
+                           else toolcalls.validate_args(name, args, _SCHEMA, check_required=False))
 
                 if seen[key] >= 3:
                     status = "halted:loop_detected"
                     done = True
                     break
 
-                if name == "finish":
+                if name == "finish" and not problem:
                     status, summary, done = "finished", args.get("summary", ""), True
                     break
 
-                if name == "run_shell":
+                if problem:
+                    result = f"error: invalid arguments for {name}: {problem}"
+                elif name == "run_shell":
                     cmd = args.get("cmd", "")
                     blocked = ""
                     if policy is not None:

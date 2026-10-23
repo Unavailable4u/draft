@@ -17,6 +17,8 @@ import os
 import statistics
 import sys
 import time
+import traceback
+import uuid
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -51,6 +53,7 @@ def run_once(scenario, make_llm, *, egress, profile, ledger_dir, task_id=None, a
             counts[ev["type"]] += 1
 
     t0 = time.time()
+    task_id = task_id or uuid.uuid4().hex[:8]       # known up front, so even a crashed run's ledger can be found
     rec = {"scenario": scenario.id, "task_id": task_id}
     try:
         llm = make_llm()
@@ -65,7 +68,7 @@ def run_once(scenario, make_llm, *, egress, profile, ledger_dir, task_id=None, a
     except Exception as e:
         rec.update(status=f"error:{type(e).__name__}", steps=0, tokens=getattr(llm, "total_tokens", 0), denials=0,
                    ledger_verified=None, passed=False, reasons=[f"the run crashed: {type(e).__name__}: {str(e)[:200]}"],
-                   facts={}, summary="", crashed=True)
+                   facts={}, summary="", crashed=True, traceback=traceback.format_exc()[-1800:])
     rec["salvaged"], rec["nudges"] = counts["llm.salvaged"], counts["agent.nudge"]
     stats = getattr(llm, "stats", None)
     rec["retries"] = int(stats["retries"]) if stats else 0
@@ -122,12 +125,21 @@ def _save_evidence(d: Path, rec: dict, store) -> None:
     try:
         d.mkdir(parents=True, exist_ok=True)
         (d / "report.txt").write_text(rec.get("summary") or "", encoding="utf-8")
+        if rec.get("traceback"):
+            (d / "error.txt").write_text(rec["traceback"], encoding="utf-8")
         (d / "check.json").write_text(json.dumps({k: rec.get(k) for k in ("passed", "reasons", "facts", "status")},
                                                  indent=1), encoding="utf-8")
-        prefix = f"tasks/{rec.get('task_id')}/pages/"
+        pages = f"tasks/{rec.get('task_id')}/pages/"
+        files = f"tasks/{rec.get('task_id')}/workspace/"          # the agent's final files, as it left them
+        root = (d / "workspace").resolve()
         for key, data in sorted(getattr(store, "objects", {}).items()):
-            if key.startswith(prefix):
+            if key.startswith(pages):
                 (d / key.rsplit("/", 1)[-1]).write_bytes(data)
+            elif key.startswith(files):
+                target = (root / key[len(files):]).resolve()
+                if root in target.parents:                        # never write outside the run's own folder
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(data)
     except OSError:
         pass
 
@@ -142,6 +154,10 @@ def render(result: dict) -> str:
              f"  finished cleanly {s['finished']}/{s['runs']}   crashed {s['crashed']}   policy denials {s['denials']}",
              f"  median per run: {s['median_steps']} steps, {s['median_tokens']} tokens, {s['median_seconds']}s",
              f"  help the model needed: {s['salvaged']} recovered tool call(s), {s['nudges']} empty-reply nudge(s)"]
+    if s["crashed"]:
+        done = s["runs"] - s["crashed"]
+        lines.append(f"  without the {s['crashed']} crashed run(s): {s['passed']}/{done}"
+                     f" ({round(100 * s['passed'] / done) if done else 0}%), what the model managed when the run itself worked")
     if s["top_failures"]:
         lines += ["  why runs failed:"] + [f"    - {t}" for t in s["top_failures"]]
     if result["aborted"]:
