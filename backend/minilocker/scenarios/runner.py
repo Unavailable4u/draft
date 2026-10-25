@@ -48,9 +48,13 @@ def run_once(scenario, make_llm, *, egress, profile, ledger_dir, task_id=None, a
     counts = Counter()
     llm = None
 
+    unavailable = []
+
     def watch(ev):
         if ev["type"] in ("llm.salvaged", "agent.nudge"):
             counts[ev["type"]] += 1
+        elif ev["type"] == "browser.unavailable":
+            unavailable.append((ev.get("payload") or {}).get("reason", ""))
 
     t0 = time.time()
     task_id = task_id or uuid.uuid4().hex[:8]       # known up front, so even a crashed run's ledger can be found
@@ -69,6 +73,11 @@ def run_once(scenario, make_llm, *, egress, profile, ledger_dir, task_id=None, a
         rec.update(status=f"error:{type(e).__name__}", steps=0, tokens=getattr(llm, "total_tokens", 0), denials=0,
                    ledger_verified=None, passed=False, reasons=[f"the run crashed: {type(e).__name__}: {str(e)[:200]}"],
                    facts={}, summary="", crashed=True, traceback=traceback.format_exc()[-1800:])
+    if unavailable and not rec.get("passed") and not rec.get("crashed"):
+        # The browser sandbox never started (usually: its image was not built). That is the environment, not the
+        # model, so it is reported as such. It counts as a crashed run, which also lets a batch stop early.
+        rec.update(status="error:BrowserUnavailable", crashed=True,
+                   reasons=[f"the browser sandbox could not start: {unavailable[-1]}"])
     rec["salvaged"], rec["nudges"] = counts["llm.salvaged"], counts["agent.nudge"]
     stats = getattr(llm, "stats", None)
     rec["retries"] = int(stats["retries"]) if stats else 0
@@ -170,7 +179,13 @@ def _hosts_for(scenario) -> list:
     return base + [h for h in scenario.allow if h not in base]
 
 
-def main(argv=None, make_llm=None, make_egress=None, out=None) -> int:
+def _browser_missing(name) -> str:
+    from minilocker.sandbox.browser import BROWSER_IMAGE, BUILD_HINT
+    return (f"{name} needs the browser image {BROWSER_IMAGE!r}, which was not found (or Docker is not reachable). "
+            f"Build it once, from the repository root: {BUILD_HINT}")
+
+
+def main(argv=None, make_llm=None, make_egress=None, out=None, browser_ready=None) -> int:
     out = out or sys.stdout
     ap = argparse.ArgumentParser(prog="python -m minilocker.scenarios", description=__doc__.split("\n\n")[0])
     ap.add_argument("--scenario", default="all", help=f"one of {', '.join(SCENARIOS)}, or all (default)")
@@ -189,6 +204,17 @@ def main(argv=None, make_llm=None, make_egress=None, out=None) -> int:
     unknown = [n for n in names if n not in SCENARIOS]
     if unknown or args.runs < 1:
         ap.error(f"unknown scenario {unknown[0]!r} (see --list)" if unknown else "--runs must be at least 1")
+
+    # Before any model call is paid for: a scenario that needs the browser image cannot run without it.
+    skipped = []
+    if any(SCENARIOS[n].needs_browser for n in names):
+        if browser_ready is None:
+            from minilocker.sandbox.browser import image_present as browser_ready
+        if not browser_ready():
+            if len(names) == 1:
+                ap.error(_browser_missing(names[0]))
+            skipped = [n for n in names if SCENARIOS[n].needs_browser]
+            names = [n for n in names if n not in skipped]
 
     if make_llm is None:
         from minilocker.config import load_and_report
@@ -227,6 +253,8 @@ def main(argv=None, make_llm=None, make_egress=None, out=None) -> int:
     for r in results:
         print(render(r), file=out)
         print(file=out)
+    for n in skipped:
+        print(f"SKIPPED {n}: {_browser_missing(n)}\n", file=out)
 
     summary_path = Path(args.out) / f"summary-{stamp}.json"
     summary_path.parent.mkdir(parents=True, exist_ok=True)

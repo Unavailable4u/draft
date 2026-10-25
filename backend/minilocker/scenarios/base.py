@@ -14,6 +14,7 @@ class Scenario:
     verify: Callable                # CheckContext -> Check
     budgets: Budgets
     allow: tuple = ()               # hosts the scenario needs reachable, on top of MINILOCKER_ALLOW
+    needs_browser: bool = False     # needs the browser sandbox image, which is built separately
 
     @property
     def needs_network(self) -> bool:

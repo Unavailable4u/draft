@@ -17,6 +17,7 @@ from test_scenarios_research import GOOD, PAGES, SOH, GGB, EIF, reading
 def local(monkeypatch):
     LocalBox.made = []
     monkeypatch.setattr(loop_mod, "Sandbox", LocalBox)
+    monkeypatch.setattr("minilocker.sandbox.browser.image_present", lambda image=None: True)   # as if it were built
     yield
     for b in LocalBox.made:
         shutil.rmtree(b.root, ignore_errors=True)

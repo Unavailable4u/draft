@@ -132,4 +132,4 @@ def _judge(ctx, n, topic, line, shots, committed):
 RESEARCH = Scenario(
     id="research", title="Research with receipts", task=TASK, files={}, verify=verify,
     budgets=Budgets(max_steps=14, max_tokens=120_000, exec_timeout_s=30, task_deadline_s=300, max_output_chars=6000),
-    allow=("wikipedia.org",))
+    allow=("wikipedia.org",), needs_browser=True)
