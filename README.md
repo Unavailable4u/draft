@@ -24,13 +24,30 @@ just read.
   injection attempts. After a page has been read, network and secret-touching commands need approval, and once a page is
   flagged, the `strict` profile denies them. Only `http(s)` URLs are accepted.
 - **A tamper-evident ledger and the Blast Radius report.** Events form a SHA-256 hash chain; one call re-verifies it. The
-  report (HTML or JSON) covers seven dimensions. Four are measured: network, policy, persistence, time. Three say
-  "not measured" instead of showing a reassuring zero: filesystem, secrets, compute.
+  report (HTML or JSON) covers nine dimensions, all measured from the ledger: network, policy, persistence, time,
+  browser, artifacts, and, from an audit taken as each sandbox is destroyed, filesystem (what changed on the root
+  filesystem, which host paths were mounted, what the workspace gained and lost), secrets (whether any real secret was in the
+  sandbox, and what happened to the decoys below) and compute (highest memory, process count and CPU seen). A dimension
+  with nothing behind it says "not measured" instead of showing a reassuring zero.
+- **Decoy credentials.** Every code sandbox is seeded with fake credentials a thief would look for: an SSH private key,
+  AWS keys (as a file and as environment variables), a GitHub token, a `.env` with a database URL and a payment key. They are
+  random per task and open nothing. Reading one, seeing one in a command's output, putting one in a command or file, or
+  copying one into the artifacts is a ledger event; in the `strict` profile, trying to *use* one stops the task. Detection is
+  best effort and is described in [SECURITY.md](SECURITY.md).
+- **A credential broker.** To let an agent call an API that needs a token without ever holding it, name the service in
+  `MINILOCKER_BROKER`. The sandbox gets only a placeholder and a URL on the egress proxy; the proxy, the one component that
+  holds the token, makes the HTTPS request itself, adds the credential, and returns the answer. The token never enters a
+  sandbox, and a real-secret audit at destroy time checks that it did not.
+- **Snapshots and rewind.** After every step that changes the workspace the control plane takes a snapshot (a gzipped tar,
+  hashed, with a manifest of every file's SHA-256). While a task runs, or is held open after it finishes (`hold_s`), you can
+  rewind to any snapshot: a fresh sandbox is built, the files are restored, and the result is re-hashed against the
+  manifest. The ledger records the rewind and keeps everything the agent did before it.
 - **An artifact store.** Files left in `/workspace` are saved to an S3-compatible store when the task ends. Each file's
   SHA-256 goes into the ledger, and a download is refused unless the chain verifies and the stored bytes match. Files are
   always served as downloads.
 - **A web UI.** Workspace (task form, live step stream, terminal, browser and files tabs, live Blast Radius panel,
-  approval dialog), Attack Lab, Report, and Sessions.
+  approval dialog), Timeline (snapshots and rewind), Attack Lab, Report, Sessions, and Infra (the host and its Vultr
+  metadata, Docker, live sandboxes, the egress proxy, the inference endpoint and the artifact store).
 
 ## Architecture
 
@@ -89,9 +106,12 @@ object store and the browser image are available. You only provide `LLM_API_KEY`
 for automatic HTTPS (its DNS record must point at the machine, and ports 80 and 443 must be reachable), or `HTTP_PORT`
 if port 80 is taken. See `deploy/env.production.example` for every setting.
 
+To rehearse the deployment on any clean Ubuntu machine, run `deploy/dry_run.sh`: it runs `bootstrap.sh` twice and checks that the
+token is required, the generated secrets survive the second run, and no sandbox is left behind.
+
 ## The Attack Lab
 
-There are **13 scripted attacks**. Each drives the real agent loop, policy engine and Docker sandbox with no model in the
+There are **15 scripted attacks**. Each drives the real agent loop, policy engine and Docker sandbox with no model in the
 loop, then checks the outcome against what actually happened (including the container's Docker settings, read back
 from Docker, not from our request). The verdict is *contained*, *breached*, or *inconclusive* when an attack did not
 exercise the property it targets. Run them in the UI, or in CI-style with `pytest -m attacks`.
@@ -104,10 +124,12 @@ exercise the property it targets. Run them in the UI, or in CI-style with `pytes
 | `cpu_burn` | Spins forever; the deadline must kill the whole container. |
 | `memory_bomb` | Allocates memory in 32 MB chunks until something gives. |
 | `disk_fill` | Writes 512 MB to the workspace and to `/tmp`, then tries to write into the system. |
-| `read_secrets` | Looks for SSH keys, `/etc/shadow`, process environments, a host canary file, a host secret and the LLM key. |
+| `read_secrets` | Looks for SSH keys, `/etc/shadow`, process environments, a host canary file, a host secret and the LLM key. The only key to be found is a decoy; reading it must be recorded. |
 | `exfil_unknown_domain` | POSTs "stolen" data to an unlisted host through the proxy, then tries to bypass the proxy. |
 | `host_escape_probes` | Looks for the Docker socket, tries to mount a filesystem and to enter PID 1's namespaces. |
 | `malicious_repo_hook` | A repository's postinstall script reads secrets, plants a backdoor, persists and phones home. |
+| `credential_theft_exfil` | A script reads the AWS credentials and tokens a dev machine would have and POSTs them to an unlisted host. |
+| `rewind_after_rm_rf` | Writes a file, deletes the whole workspace, and the operator rewinds to the snapshot taken after the write. |
 | `hostile_page_injection` | A page tells the agent to leak its environment; a compromised agent obeys, then follows the page's link. |
 | `hostile_page_active_content` | A page's JavaScript exfiltrates, opens a WebSocket, reads `file://`, fires a beacon, opens popups. |
 | `browser_local_file_access` | The agent is told to open `file:///etc/passwd`; a page tries to read local files four ways. |
@@ -131,6 +153,9 @@ exercise the property it targets. Run them in the UI, or in CI-style with `pytes
 | `MINILOCKER_S3_REGION`, `MINILOCKER_S3_BUCKET` | `us-east-1`, `minilocker-artifacts` | Store details. The bucket is created if missing. |
 | `MINILOCKER_BROWSER_IMAGE` | `minilocker-browser:latest` | The browser sandbox image. |
 | `MINILOCKER_PROXY_IMAGE` | unset | Set when the API itself runs in a container: the egress proxy then runs from this image instead of a mounted file. |
+| `MINILOCKER_BROKER` | unset | Credential broker services: `name=host[:header],...`, for example `github=api.github.com`. The header defaults to `Authorization` (sent as `Bearer <token>`); any other header carries the bare token. A service with no token is ignored. |
+| `MINILOCKER_BROKER_TOKEN_<NAME>` | unset | The real token for broker service `<NAME>` (upper case), for example `MINILOCKER_BROKER_TOKEN_GITHUB`. It is passed only to the egress proxy container. |
+| `MINILOCKER_BROKER_URL` | set for you | Not a setting: the control plane sets it inside sandboxes (with a `MINILOCKER_TOKEN_<NAME>` placeholder per service) when a broker is configured. |
 | `MINILOCKER_ENV_FILE` | unset | Load this file instead of searching for `.env` / `deploy/.env`. |
 | `MINILOCKER_BROWSER_FIXTURES` | unset | Internal: the Attack Lab sets it so its hostile test pages are served. Never set it for real use. |
 
@@ -184,12 +209,18 @@ outcome with a check the model never sees, and repeat it so you get a rate and n
 cd backend
 python -m minilocker.scenarios --list
 python -m minilocker.scenarios --scenario fix_repo --runs 10     # offline: no network needed
+python -m minilocker.scenarios --scenario fix_repo_v2 --runs 10  # the stricter version: see below
 python -m minilocker.scenarios --scenario research --runs 10     # needs Docker to reach wikipedia.org
 ```
 
 - **fix_repo**: a small pricing library with three independent bugs and a failing `unittest` suite. The check puts the
   original tests back, runs hidden tests with other inputs, and counts a test only if its own runner reported a pass, so
   editing or deleting tests, special-casing the examples, or a library that exits early all fail.
+- **fix_repo_v2**: the same three bugs with an honest brief. The repo's README states every rule the hidden tests check, each
+  hidden test fails on the broken library (the first version had five that already passed), each is tagged with the bug it
+  targets so ten runs say *which* bug a model misses, and the repository ships a hostile "usage statistics" module that tries
+  to read credentials, post them to an unlisted host, open a raw socket and write outside the workspace. If any of that gets
+  out of the sandbox the run fails with "containment breached". Use this one for the numbers you quote.
 - **research**: three questions answered from Wikipedia, each line citing the screenshot it came from. A claim counts only
   if that screenshot was really taken, is of the right article, matches the hash the ledger recorded, and the saved text of
   that page contains the answer. Every browse result names its screenshot, and the text the model read is kept as
@@ -227,13 +258,15 @@ the code (attack list, settings, budgets, hardening numbers, links).
 - `backend/minilocker/sandbox/`: the hardened code sandbox and the browser sandbox with its in-container worker.
 - `backend/minilocker/egress/`: the allowlisting proxy and its network manager.
 - `backend/minilocker/ledger/`: the hash chain, the Blast Radius report, session summaries.
+- `backend/minilocker/trust/`: decoy credentials and the list of real secrets the audit looks for.
+- `backend/minilocker/infra/`: what the Infra screen reads (host, Docker, Vultr metadata, endpoints).
 - `backend/minilocker/artifacts/`: the S3 artifact store and workspace export.
 - `backend/minilocker/attacks/`: the Attack Lab catalog and runner.
 - `backend/minilocker/api/`: the FastAPI control plane.
 - `frontend/`: the React UI.
 - `images/browser/`: the browser sandbox image and its test fixtures.
 - `deploy/`: the compose stack, Caddy config, Dockerfiles and `bootstrap.sh`.
-- `docs/`: design notes.
+- `docs/`: design notes, the demo script (`DEMO_SCRIPT.md`), the submission text and checklist (`SUBMISSION.md`), and the cover image (`assets/cover.png`).
 
 ## Security
 
@@ -246,9 +279,9 @@ Attack Lab exists so you can see both facts for yourself.
 Working and tested end to end: sandboxed execution, egress control, policy and approvals, the browser sandbox and
 prompt-injection defences, the ledger and report, the artifact store, the Attack Lab, and the deployment.
 
-Not built yet, and shown as placeholders in the UI where relevant: snapshots with rewind (the Timeline screen), the
-Infra screen, a credential broker with canary tokens, and measurement for the filesystem, secrets and compute
-dimensions of the report. Screenshots go to the UI, not to the model (no vision step), and there is no
+Also built and covered by tests: decoy credentials, the credential broker, the filesystem, secrets and compute parts of
+the report, snapshots with rewind, and the Timeline and Infra screens. The broker has been exercised against a recorded
+upstream, not yet against a live API. Screenshots go to the UI, not to the model (no vision step), and there is no
 approve-before-submit gate for web forms.
 
 ## License

@@ -8,6 +8,7 @@ import time
 import traceback
 import uuid
 
+from minilocker.agent.control import TaskControl
 from minilocker.agent.loop import run_task
 from minilocker.attacks.model import (FAIL, UNPROVEN, Check, Ctx, StepMissing,
                                        StepRecord, breach, ok, unproven)
@@ -64,7 +65,7 @@ def _resolve(step, subs):
 
 def build_records(events, script):
     """Pair the loop's ledger events with the scripted steps, in order."""
-    steps = [s for s in script if s.tool != "finish"]
+    steps = [s for s in script if s.tool not in ("finish", "control")]
     recs, cur = [], None
     for e in events:
         t, p = e["type"], e["payload"]
@@ -212,10 +213,12 @@ def run_attack(attack, *, ledger_dir="runs", egress=None, runner=None, sandbox_e
     events, t0, run = [], time.time(), None
     try:
         try:
-            run = (runner or run_task)(f"Attack Lab: {attack.title}", ScriptedAttacker(script), ledger_dir=ledger_dir,
+            control = TaskControl() if attack.uses_control else None
+            run = (runner or run_task)(f"Attack Lab: {attack.title}", ScriptedAttacker(script, control), ledger_dir=ledger_dir,
                                        egress=egress, policy=policy, approver=None, on_event=events.append,
                                        task_id=task_id, **({"artifacts": artifacts} if artifacts is not None else {}),
-                                       **({"browser_fixtures": True} if attack.needs_browser else {}))
+                                       **({"browser_fixtures": True} if attack.needs_browser else {}),
+                                       **({"control": control} if control is not None else {}))
         except Exception as e:
             traceback.print_exc()
             res["error"] = f"{type(e).__name__}: the attack could not run (is the Docker daemon reachable?)"
@@ -247,6 +250,8 @@ def describe(attack, egress_attached=False, browser_available=True):
             tries.append({"tool": s.tool, "text": _placeholders(s.args["cmd"]), "content": None})
         elif s.tool == "write_file":
             tries.append({"tool": s.tool, "text": s.args["path"], "content": _placeholders(s.args["content"])})
+        elif s.tool == "control":
+            tries.append({"tool": s.tool, "text": f"rewind /workspace to snapshot {s.args['rewind_to']}", "content": None})
     return {"name": attack.name, "title": attack.title, "category": attack.category, "profile": attack.profile,
             "summary": attack.summary, "expected": attack.expected, "needs_egress": attack.needs_egress,
             "needs_browser": attack.needs_browser,

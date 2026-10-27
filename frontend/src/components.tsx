@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { LedgerEvent, Profile, Report } from "./api";
-import { listApprovals, resolveApproval } from "./api";
-import { blast, describe, groupLines, toolLine } from "./derive";
+import { listApprovals, listScenarios, resolveApproval } from "./api";
+import type { ScenarioInfo } from "./api";
+import { blast, describe, groupLines, measure, toolLine } from "./derive";
 import { Md } from "./Md";
 import type { Tone } from "./derive";
 
@@ -10,14 +11,30 @@ const TONE: Record<Tone, string> = {
 };
 
 export function TaskForm({ running, error, onRun }: {
-  running: boolean; error: string | null; onRun: (t: string, p: Profile) => void;
+  running: boolean; error: string | null; onRun: (t: string, p: Profile, holdS: number, scenario: string | null) => void;
 }) {
   const [text, setText] = useState("");
   const [profile, setProfile] = useState<Profile>("strict");
-  const go = () => { if (!running && text.trim()) onRun(text.trim(), profile); };
+  const [hold, setHold] = useState(0);
+  const [scenarios, setScenarios] = useState<ScenarioInfo[]>([]);
+  const [scenario, setScenario] = useState("");
+  useEffect(() => { listScenarios().then(r => setScenarios(r.scenarios)).catch(() => { /* free-text tasks still work */ }); }, []);
+  const sc = scenarios.find(s => s.id === scenario);
+  const go = () => { if (!running && (sc || text.trim())) onRun(sc ? sc.task : text.trim(), profile, hold, sc ? sc.id : null); };
   return (
     <div className="space-y-2 border-b border-zinc-800 p-3">
-      <textarea value={text} onChange={e => setText(e.target.value)} rows={4} maxLength={4000}
+      {scenarios.length > 0 && (
+        <select value={scenario} onChange={e => setScenario(e.target.value)} title="A prepared task with files and a hidden success check"
+          className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs">
+          <option value="">Your own task</option>
+          {scenarios.map(s => (
+            <option key={s.id} value={s.id} disabled={!s.available}>
+              {s.title}{s.available ? "" : s.needs_browser && s.missing_hosts.length === 0 ? " (needs the browser image)" : ` (needs ${s.missing_hosts.join(", ") || "the browser image"} allowlisted)`}
+            </option>
+          ))}
+        </select>
+      )}
+      <textarea value={sc ? sc.task : text} onChange={e => setText(e.target.value)} rows={4} maxLength={4000} readOnly={!!sc}
         onKeyDown={e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) go(); }}
         placeholder="Describe a task for the agent… (Ctrl+Enter to run)"
         className="w-full resize-none rounded border border-zinc-700 bg-zinc-900 p-2 text-sm outline-none focus:border-emerald-600" />
@@ -27,7 +44,15 @@ export function TaskForm({ running, error, onRun }: {
           <option value="strict">strict</option>
           <option value="observe">observe</option>
         </select>
-        <button onClick={go} disabled={running || !text.trim()}
+        <select value={hold} onChange={e => setHold(Number(e.target.value))}
+          title="Keep the sandbox open after the agent stops, so its workspace can be inspected and rewound on the Timeline"
+          className="rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs">
+          <option value={0}>no hold</option>
+          <option value={60}>hold 1 min</option>
+          <option value={180}>hold 3 min</option>
+          <option value={600}>hold 10 min</option>
+        </select>
+        <button onClick={go} disabled={running || !(sc || text.trim())}
           className="ml-auto rounded bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white disabled:opacity-40">
           {running ? "Running…" : "Run in sandbox"}
         </button>
@@ -104,7 +129,30 @@ function Gauge({ label, value, sub, tone }: { label: string; value: string | num
   );
 }
 
-const UNMEASURED = ["filesystem", "secrets", "compute"];
+const MIB = 1024 * 1024;
+
+/** Filesystem, secrets and compute gauges. Until a sandbox has been audited (that happens as it is destroyed) they say
+ *  so; they never show a zero that nothing measured. */
+function measuredGauges(events: LedgerEvent[], running: boolean) {
+  const x = measure(events);
+  const wait = running ? "measured when the sandbox is destroyed" : "not measured";
+  if (!x.audited)
+    return [
+      <Gauge key="fs" label="Filesystem" value="—" tone="info" sub={wait} />,
+      <Gauge key="sec" label="Secrets" value="—" tone="info" sub={wait} />,
+      <Gauge key="cpu" label="Compute" value="—" tone="info" sub={wait} />,
+    ];
+  const ws = x.workspace;
+  const decoys = x.decoysRead.size + x.decoysTripped.size;
+  return [
+    <Gauge key="fs" label="Filesystem" value={x.hostBinds} tone={x.hostBinds ? "bad" : "ok"}
+      sub={`host paths mounted · ${x.rootfsChanges} system files changed${ws ? ` · workspace +${ws.added} ~${ws.modified} −${ws.deleted}` : ""}`} />,
+    <Gauge key="sec" label="Secrets" value={x.realSecrets.length} tone={x.realSecrets.length ? "bad" : x.decoysTripped.size ? "warn" : "ok"}
+      sub={`real in sandbox${x.scanned ? "" : " (inside not scanned)"} · ${x.decoysRead.size} of ${x.decoysPlanted || "?"} decoys read · ${x.decoysTripped.size} used`} />,
+    <Gauge key="cpu" label="Compute" value={`${Math.round(x.peakMem / MIB)} MiB`} tone={x.oom ? "bad" : x.memLimit && x.peakMem / x.memLimit > 0.8 ? "warn" : "ok"}
+      sub={`peak of ${Math.round(x.memLimit / MIB)} · ${x.peakPids}/${x.pidsLimit} pids · ${x.cpuS.toFixed(1)} s cpu${x.oom ? " · OOM killed" : ""}`} />,
+  ];
+}
 
 export function BlastPanel({ events, report, running }: { events: LedgerEvent[]; report: Report | null; running: boolean }) {
   const m = blast(events);
@@ -116,16 +164,10 @@ export function BlastPanel({ events, report, running }: { events: LedgerEvent[];
           sub={`blocked · ${m.allowed} allowed · ${m.hosts.size} hosts`} />
         <Gauge label="Policy" value={m.denied} tone={m.denied ? "bad" : "ok"}
           sub={`denied · ${m.asked} approvals · ${m.decisions} checked`} />
+        {measuredGauges(events, running)}
         <Gauge label="Sandboxes" value={m.created} tone="info"
-          sub={`created · ${m.destroyed} destroyed · ${m.forced} killed`} />
+          sub={`created · ${m.destroyed} destroyed · ${m.forced} killed · ${m.rewinds} rewound`} />
         <Gauge label="Time" value={`${m.seconds.toFixed(0)}s`} tone="info" sub={running ? "so far" : "wall clock"} />
-      </div>
-      <div className="px-3 pb-2 text-xs text-zinc-500">
-        {UNMEASURED.map(k => (
-          <span key={k} className="mr-3" title={report?.dimensions[k]?.note}>
-            {k}: {report?.dimensions[k]?.status === "measured" ? "measured" : "not measured"}
-          </span>
-        ))}
       </div>
       <div className="mx-3 mb-2 rounded border border-zinc-800 p-2 text-xs">
         {report

@@ -51,7 +51,7 @@ def test_packaged_mode_mounts_nothing_from_this_filesystem(monkeypatch):
     assert "volumes" not in kw                        # a host path would not exist on the Docker host
     # the hardening is identical in both modes
     assert kw["read_only"] and kw["cap_drop"] == ["ALL"] and kw["user"] == "65534:65534"
-    assert kw["environment"] == {"ALLOWED_HOSTS": "pypi.org"}
+    assert kw["environment"] == {"ALLOWED_HOSTS": "pypi.org", "PROXY_ALIAS": mgr.ALIAS}      # no broker: no tokens
 
 
 def test_default_egress_reads_the_image_from_the_environment(monkeypatch):
@@ -107,3 +107,15 @@ def test_unconfigured_storage_is_not_retried(monkeypatch):
                         staticmethod(lambda: calls.__setitem__("n", calls["n"] + 1)))   # returns None
     assert app_mod._default_artifacts(sleep=lambda s: pytest.fail("must not sleep")) == (None, None)
     assert calls["n"] == 1
+
+
+def test_broker_tokens_go_to_the_proxy_container_only(monkeypatch):
+    m, fake = manager(monkeypatch, image="minilocker-api:latest", packaged=True,
+                      broker=mgr.broker_from_env({"MINILOCKER_BROKER": "github=api.github.com",
+                                                  "MINILOCKER_BROKER_TOKEN_GITHUB": "ghp_abcdefghijkl"}))
+    m.start()
+    import json as _json
+    env = fake.run_kwargs["environment"]
+    assert _json.loads(env["BROKER_SERVICES"])["github"]["token"] == "ghp_abcdefghijkl"
+    sandbox_env = m.proxy_env()
+    assert "ghp_abcdefghijkl" not in _json.dumps(sandbox_env)

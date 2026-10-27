@@ -2,10 +2,12 @@ import { useEffect, useState } from "react";
 import { getToken, setToken } from "./api";
 import { AttackLab } from "./AttackLab";
 import { BrowserView } from "./Browser";
-import { ApprovalModal, BlastPanel, StepStream, Stub, TaskForm } from "./components";
+import { ApprovalModal, BlastPanel, StepStream, TaskForm } from "./components";
 import { FilesView } from "./Files";
+import { InfraView } from "./Infra";
 import { ReportScreen } from "./Report";
 import { SessionsScreen } from "./Sessions";
+import { TimelineView } from "./Timeline";
 import { TerminalView } from "./Terminal";
 import { useAttacks } from "./useAttacks";
 import { useTask } from "./useTask";
@@ -14,13 +16,13 @@ import type { TaskApi } from "./useTask";
 type Screen = "workspace" | "timeline" | "attacks" | "report" | "sessions" | "infra";
 type Tab = "terminal" | "browser" | "files";
 
-const SCREENS: { id: Screen; label: string; needs?: string }[] = [
+const SCREENS: { id: Screen; label: string }[] = [
   { id: "workspace", label: "Workspace" },
-  { id: "timeline", label: "Timeline", needs: "Needs snapshots and POST /api/tasks/{id}/rewind (Week 4)." },
+  { id: "timeline", label: "Timeline" },
   { id: "attacks", label: "Attack Lab" },
   { id: "report", label: "Report" },
   { id: "sessions", label: "Sessions" },
-  { id: "infra", label: "Infra", needs: "Needs an infra/status endpoint (VM, running sandboxes, resource use)." },
+  { id: "infra", label: "Infra" },
 ];
 
 function Workspace({ t }: { t: TaskApi }) {
@@ -61,7 +63,6 @@ export default function App() {
   const [reportOverride, setReportOverride] = useState<string | null>(null);
   useEffect(() => setReportOverride(null), [t.taskId]);
   const reportId = reportOverride ?? t.taskId;
-  const cur = SCREENS.find(s => s.id === screen)!;
   const status = !t.taskId ? "idle" : t.running ? "running" : (t.end?.status ?? "done");
   return (
     <div className="flex h-full flex-col bg-zinc-950 text-sm text-zinc-200">
@@ -85,7 +86,8 @@ export default function App() {
         : screen === "report" ? <ReportScreen taskId={reportId} done={reportOverride !== null || (t.taskId !== null && !t.running)} />
         : screen === "sessions" ? <SessionsScreen onOpen={id => { t.attach(id); setScreen("workspace"); }}
             onReport={id => { setReportOverride(id); setScreen("report"); }} />
-        : <Stub title={cur.label} needs={cur.needs!} />}
+        : screen === "timeline" ? <TimelineView taskId={t.taskId} events={t.events} running={t.running} />
+        : <InfraView active={screen === "infra"} />}
       {t.approval && t.taskId && <ApprovalModal key={t.approval.payload.id} ev={t.approval} taskId={t.taskId} />}
     </div>
   );

@@ -19,9 +19,9 @@ export function useTask() {
     streamEvents(id, e => setEvents(p => [...p, e]), setEnd, ac.signal);
   }, []);
 
-  const start = useCallback(async (text: string, profile: Profile) => {
+  const start = useCallback(async (text: string, profile: Profile, hold_s = 0, scenario: string | null = null) => {
     setError(null);
-    try { attach((await createTask(text, profile)).task_id); }
+    try { attach((await createTask(text, profile, hold_s, scenario)).task_id); }
     catch (e) { setError((e as Error).message); }
   }, [attach]);
 

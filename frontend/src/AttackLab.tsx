@@ -176,7 +176,7 @@ function Preview({ a }: { a: AttackInfo }) {
         <ol className="space-y-2">
           {a.tries.map((t, i) => (
             <li key={i} className="text-xs">
-              <div className="flex gap-2"><span className="shrink-0 text-zinc-600">{t.tool === "write_file" ? "write" : "$"}</span>
+              <div className="flex gap-2"><span className="shrink-0 text-zinc-600">{t.tool === "write_file" ? "write" : t.tool === "control" ? "↺" : "$"}</span>
                 <code className="break-all text-zinc-200">{t.text}</code></div>
               {t.content && <details className="pl-5 text-zinc-500"><summary className="cursor-pointer">file contents</summary>
                 <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-zinc-900 p-2 text-zinc-400">{t.content}</pre></details>}

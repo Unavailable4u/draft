@@ -30,7 +30,10 @@ sandbox by design); an attacker with a kernel or container-runtime zero-day; an 
 | Sandbox | Fresh container per task: non-root (65534), read-only root, all capabilities dropped, `no-new-privileges`, 128 processes, 512 MB memory with no swap, one CPU, size-capped in-memory `/workspace` and `/tmp`. No Docker socket inside. | `rm_rf_root`, `fork_bomb`, `memory_bomb`, `disk_fill`, `host_escape_probes` |
 | Deadline | A command that exceeds its time limit has its whole container killed and replaced, not just the process. A sandbox that can no longer start processes is replaced too. | `cpu_burn`, `fork_bomb` |
 | Network | Sandboxes sit on an internal network with no route out. The only exit is a proxy that accepts HTTPS `CONNECT` to allowlisted hosts and refuses everything else; every attempt is logged against the container that made it. | `exfil_unknown_domain`, `hostile_page_active_content` |
-| Secrets | The LLM key and storage credentials live in the control plane's environment only; sandboxes start with a clean one. The checks also look for them in the ledger. | `read_secrets`, `malicious_repo_hook` |
+| Secrets | The LLM key and storage credentials live in the control plane's environment only; sandboxes start with a clean one. As each sandbox is destroyed, an audit looks for the value of every real secret in its container configuration, process environments and files, and the report says whether any was found. The checks also look for them in the ledger. | `read_secrets`, `malicious_repo_hook` |
+| Decoys | Each code sandbox holds random fake credentials (SSH key, AWS keys, GitHub token, `.env`). Reading one, printing one, putting one in a command or file, or copying one into the artifacts is recorded; in `strict`, using one in a command stops the task. | `read_secrets`, `malicious_repo_hook`, `credential_theft_exfil` |
+| Credential broker | For services named in `MINILOCKER_BROKER`, the egress proxy adds the credential to a request it makes itself. The sandbox holds a placeholder only, cannot supply its own `Authorization` header, and an upstream that echoes the token gets it replaced. | unit tests (`test_broker.py`), not an attack |
+| Recovery | Snapshots of the workspace are taken after every step that changes it; a rewind builds a fresh sandbox, restores the files and re-hashes them against the snapshot's manifest. The ledger keeps what was undone. | `rewind_after_rm_rf` |
 | Policy | Regex risk rules. `strict` denies high-risk commands and asks a human about medium-risk ones. Approvals have a timeout and default to denial. A run halts after 5 denials, 12 steps, 40,000 tokens or 300 seconds. | `deny_then_bypass` |
 | Web content | Page text is fenced as untrusted data with a random nonce, invisible Unicode is stripped, and a scanner flags injection attempts. After a page is read, network and secret-touching commands need approval; after a flagged page, `strict` denies them. | `hostile_page_injection` |
 | Browser | Chromium in its own container (non-root, read-only, capabilities dropped, no route out). The worker accepts `http(s)` only. | `browser_local_file_access`, `hostile_page_active_content` |
@@ -67,9 +70,21 @@ These are deliberate or known. Read them before relying on this for anything rea
 7. **Authentication is one shared bearer token.** There are no user accounts, roles or rate limits beyond the limits on
    concurrent tasks and attack runs. Served over plain HTTP (the default when `SITE_ADDRESS` is a port) the token travels
    in the clear; use a domain name so Caddy provides HTTPS.
-8. **Parts of the Blast Radius are not measured.** The report says "not measured" for filesystem, secrets and compute,
-   and makes no claim about them. There is also no credential broker or canary-token system yet.
-9. **The Attack Lab proves what it covers.** Thirteen attacks passing is evidence about those thirteen. Each check also
+8. **The measurements are polled and heuristic, and say so.** Compute is the highest value a poller saw on the container's
+   cgroup counters, so a spike shorter than the polling interval can be missed. The secrets audit looks only for the values of
+   variables in the control plane's environment whose names look like a key, token, secret or password (plus the ones this
+   project names), so a secret kept under an innocent name is not on its list, and one that was encoded, split or transformed
+   inside the sandbox is not found. A decoy *read* is inferred from the file's access time, which a process can reset; a decoy that is only an
+   environment variable cannot be tracked as read at all. A measurement that could not be taken is listed as `incomplete`
+   in the report, and a run with no audit at all says "not measured".
+9. **The broker is a gateway, not a way to make a powerful token safe.** A hijacked agent cannot read the token, but it can
+   ask the broker to do anything the token allows, to the one host configured. Give a service the narrowest token you can.
+   Echoed tokens are redacted only when they appear byte for byte. It has been tested against a recorded upstream, not a
+   live API.
+10. **A rewind restores files, not the world.** It undoes what the agent did to the workspace; it cannot take back anything
+   that already left (a request an allowlisted host received, an approved action). It replaces the sandbox, so processes
+   and `/tmp` start clean. Snapshots live in the control plane's memory and are lost when it restarts or the task ends.
+11. **The Attack Lab proves what it covers.** Fifteen attacks passing is evidence about those fifteen. Each check also
    reports *inconclusive* when an attack did not exercise the property it targets, so a pass cannot hide behind an attack
    that never ran.
 

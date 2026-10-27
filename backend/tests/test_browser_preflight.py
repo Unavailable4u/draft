@@ -108,6 +108,9 @@ def test_the_message_names_the_image_and_the_build_command(capsys):
 
 def test_all_skips_the_browser_scenario_and_still_runs_the_others(tmp_path, monkeypatch):
     monkeypatch.setattr(loop_mod, "Sandbox", LocalBox)
+    # LocalBox runs commands on this machine, so only scenarios that are safe there may be swept in by "all"
+    # (fix_repo_v2 carries a hostile fixture that must only ever run inside a Docker sandbox).
+    monkeypatch.setattr(runner, "SCENARIOS", {k: v for k, v in SCENARIOS.items() if k in ("fix_repo", "research")})
     started = []
     code, text = main(["--scenario", "all", "--runs", "1", "--out", str(tmp_path)],
                       make_llm=lambda: FakeLLM(a_proper_fix()), make_egress=lambda h: started.append(h),

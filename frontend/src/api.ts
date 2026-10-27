@@ -62,9 +62,40 @@ async function json<T>(r: Response): Promise<T> {
   return r.json() as Promise<T>;
 }
 
-export const createTask = (task: string, profile: Profile) =>
-  fetch("/api/tasks", { method: "POST", headers: headers(), body: JSON.stringify({ task, profile }) })
+export const createTask = (task: string, profile: Profile, hold_s = 0, scenario: string | null = null) =>
+  fetch("/api/tasks", { method: "POST", headers: headers(), body: JSON.stringify({ task, profile, hold_s, scenario }) })
     .then(r => json<{ task_id: string; status: string }>(r));
+
+export type ScenarioInfo = {
+  id: string; title: string; task: string; needs_browser: boolean; allow: string[]; missing_hosts: string[]; available: boolean;
+};
+export const listScenarios = () =>
+  fetch("/api/scenarios", { headers: headers() }).then(r => json<{ scenarios: ScenarioInfo[] }>(r));
+
+/** Queue a rewind of the running task's /workspace to a snapshot. The loop does it at its next safe point and
+ *  records `timeline.rewound` in the ledger: the UI shows it when that event arrives, not when this resolves. */
+export const rewindTask = (id: string, snapshot: number) =>
+  fetch(`/api/tasks/${id}/rewind`, { method: "POST", headers: headers(), body: JSON.stringify({ snapshot }) })
+    .then(r => json<{ task_id: string; snapshot: number; status: string }>(r));
+
+/** End a hold early: destroy the sandbox now. */
+export const releaseTask = (id: string) =>
+  fetch(`/api/tasks/${id}/release`, { method: "POST", headers: headers() }).then(r => json<{ released: boolean }>(r));
+
+export type InfraStatus = {
+  collected_at: number;
+  host: { hostname: string; os: string; cpus: number | null; load: number[] | null; memory_total_bytes: number | null;
+    memory_available_bytes: number | null; disk_total_bytes: number; disk_free_bytes: number; uptime_s: number | null };
+  docker: { available: boolean; reason?: string; version?: string; storage_driver?: string; cgroup_version?: string;
+    runtimes?: string[]; containers_running?: number;
+    sandboxes: { name: string; role: string; status: string; age_s: number | null }[] };
+  egress: { attached: boolean; allowed_hosts?: string[]; brokered_services?: string[]; proxy?: string };
+  inference: { configured: boolean; host: string | null; model: string | null; key_set: boolean; tool_mode: string; vultr: boolean };
+  storage: { attached: boolean; error: string | null; endpoint_host: string | null; bucket: string | null; vultr: boolean };
+  vultr: { available: boolean; reason?: string; hostname?: string; region?: string; plan?: string; instance_id?: string;
+    public_ipv4?: string };
+};
+export const getInfra = () => fetch("/api/infra", { headers: headers() }).then(r => json<InfraStatus>(r));
 
 export const listTasks = (limit = 50) =>
   fetch(`/api/tasks?limit=${limit}`, { headers: headers() }).then(r => json<{ tasks: TaskSummary[] }>(r));

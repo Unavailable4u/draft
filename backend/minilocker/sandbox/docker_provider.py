@@ -1,8 +1,12 @@
+import socket
 import threading
+import time
 import uuid
 from dataclasses import dataclass
 
 import docker
+
+from minilocker.sandbox.measure import ResourceSampler
 
 _client_cache = None
 
@@ -36,6 +40,13 @@ class RawResult:
 class Sandbox:
     """One hardened container. `role` only changes the image/limits/command, never the
     hardening: every role is non-root, read-only, cap-less and on a network with no route out."""
+
+    # The control plane only plants decoys, measures and snapshots sandboxes that say they can (stand-ins in tests do not).
+    supports_measure = True
+    decoy_env = None          # {name: value} added to every exec; set by trust.canary (class default: a bare object has none)
+
+    def _exec_env(self) -> dict:
+        return {"environment": self.decoy_env} if self.decoy_env else {}
 
     def __init__(self, image="python:3.12-slim", workspace_mb=64, egress=None, *,
                  role="code", command="sleep infinity", mem_limit="512m", pids_limit=128,
@@ -77,6 +88,10 @@ class Sandbox:
             **net,
         )
         self.dead = False
+        self.decoy_env = {}          # decoy credentials added to every exec (see trust.canary); never the container's own env
+        self.created_at = time.time()
+        self._sampler = ResourceSampler(self.container)
+        self._sampler.start()
         self.ip = ""
         if egress is not None:
             self.container.reload()
@@ -88,7 +103,7 @@ class Sandbox:
 
         def work():
             try:
-                code, (out, err) = self.container.exec_run(["sh", "-c", cmd], demux=True)
+                code, (out, err) = self.container.exec_run(["sh", "-c", cmd], demux=True, **self._exec_env())
                 box["r"] = (code, out or b"", err or b"")
             except Exception as e:  # container killed mid-exec
                 box["err"] = e
@@ -119,7 +134,7 @@ class Sandbox:
         def work():
             try:
                 api = self.container.client.api
-                eid = api.exec_create(self.container.id, argv, stdout=True, stderr=True)["Id"]
+                eid = api.exec_create(self.container.id, argv, stdout=True, stderr=True, **self._exec_env())["Id"]
                 for out, err in api.exec_start(eid, stream=True, demux=True):
                     if out:
                         room = max_bytes - len(box["out"])
@@ -142,6 +157,51 @@ class Sandbox:
         if "error" in box or box.get("code") is None:
             return RawResult(137, bytes(box["out"]), str(box.get("error", "")).encode(), True, box["trunc"])
         return RawResult(box["code"], bytes(box["out"]), bytes(box["err"]), False, box["trunc"])
+
+    def exec_stdin(self, argv: list, data: bytes, timeout_s: int = 60, max_out: int = 65536) -> RawResult:
+        """Run argv (no shell) with `data` on its standard input. For restoring a snapshot into a fresh sandbox. Same hard
+        deadline as exec(): on timeout the whole container is killed."""
+        box = {"out": bytearray()}
+
+        def work():
+            try:
+                api = self.container.client.api
+                eid = api.exec_create(self.container.id, argv, stdin=True, stdout=True, stderr=True, **self._exec_env())["Id"]
+                sock = api.exec_start(eid, socket=True)
+                raw = getattr(sock, "_sock", sock)
+                raw.sendall(data)
+                raw.shutdown(socket.SHUT_WR)
+                while True:
+                    chunk = raw.recv(65536)
+                    if not chunk:
+                        break
+                    if len(box["out"]) < max_out:
+                        box["out"] += chunk[:max_out - len(box["out"])]
+                try:
+                    raw.close()
+                except Exception:
+                    pass
+                box["code"] = api.exec_inspect(eid).get("ExitCode")
+            except Exception as e:
+                box["error"] = e
+
+        t = threading.Thread(target=work, daemon=True)
+        t.start()
+        t.join(timeout_s)
+        if t.is_alive():
+            self.container.kill()
+            self.dead = True
+            t.join(5)
+            return RawResult(137, b"", bytes(box["out"]), True)
+        if "error" in box or box.get("code") is None:
+            return RawResult(137, b"", str(box.get("error", "")).encode(), False)
+        return RawResult(box["code"], b"", bytes(box["out"]), False)
+
+    def measure(self, final_sample: bool = True) -> dict:
+        """Highest memory / process / CPU use the control plane has seen for this container so far."""
+        if final_sample and not self.dead:
+            self._sampler.sample_once()
+        return self._sampler.summary()
 
     def hardening(self) -> dict:
         """The enforced invariants as docker reports them for THIS container (not as we asked
@@ -175,4 +235,5 @@ class Sandbox:
             return {}
 
     def destroy(self):
+        self._sampler.stop()
         self.container.remove(force=True)

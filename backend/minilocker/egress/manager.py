@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import time
 
 import docker
@@ -12,10 +13,38 @@ ALIAS = "egress-proxy"
 PORT = 3128
 
 
+SERVICE_RE = re.compile(r"^[a-z][a-z0-9_]{0,23}$")
+HOST_RE = re.compile(r"^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$")
+
+
+def broker_from_env(environ=None) -> dict:
+    """Credential broker services from the environment.
+
+        MINILOCKER_BROKER=github=api.github.com,openai=api.openai.com:authorization
+        MINILOCKER_BROKER_TOKEN_GITHUB=<the real token>
+
+    Each entry is `name=host` or `name=host:header` (default header `Authorization`, sent as `Bearer <token>`; any other header
+    carries the bare token). A service with no token is skipped, and so is anything that is not a plain name and a public-looking
+    host name. Returns {name: {"host", "header", "prefix", "token", "placeholder"}}; the tokens stay in the proxy."""
+    env = os.environ if environ is None else environ
+    out = {}
+    for entry in (env.get("MINILOCKER_BROKER") or "").split(","):
+        name, _, rest = entry.strip().partition("=")
+        host, _, header = rest.partition(":")
+        name, host, header = name.strip().lower(), host.strip().lower(), (header.strip() or "Authorization")
+        token = env.get("MINILOCKER_BROKER_TOKEN_" + name.upper(), "")
+        if not (SERVICE_RE.match(name) and HOST_RE.match(host) and re.match(r"^[A-Za-z][A-Za-z0-9-]*$", header) and len(token) >= 8):
+            continue
+        out[name] = {"host": host, "header": header, "token": token,
+                     "prefix": "Bearer " if header.lower() == "authorization" else "",
+                     "placeholder": f"mlk_placeholder_{name}"}
+    return out
+
+
 class EgressManager:
     internal_network = INTERNAL
 
-    def __init__(self, allowed_hosts, image="python:3.12-slim", packaged=False):
+    def __init__(self, allowed_hosts, image="python:3.12-slim", packaged=False, broker=None):
         """packaged=True: the proxy code ships inside `image` (module minilocker.egress.proxy_server).
         Required when the control plane itself runs in a container: bind-mounting a file from
         this process's filesystem would name a path that does not exist on the Docker host."""
@@ -24,6 +53,7 @@ class EgressManager:
         self.packaged = packaged
         self.image = image
         self.container = None
+        self.broker = dict(broker or {})        # see broker_from_env; the real tokens go to the proxy container only
 
     def _ensure_network(self, name, internal):
         try:
@@ -46,7 +76,8 @@ class EgressManager:
             self.image, name=PROXY, detach=True,
             network=EXTERNAL,
             **code,
-            environment={"ALLOWED_HOSTS": ",".join(self.allowed)},
+            environment={"ALLOWED_HOSTS": ",".join(self.allowed), "PROXY_ALIAS": ALIAS,
+                         **({"BROKER_SERVICES": json.dumps(self.broker)} if self.broker else {})},
             user="65534:65534", read_only=True, cap_drop=["ALL"],
             security_opt=["no-new-privileges"], pids_limit=64, mem_limit="128m",
             labels={"minilocker": "proxy"})
@@ -66,10 +97,18 @@ class EgressManager:
             pass
         self.container = None
 
+    def broker_services(self) -> dict:
+        """{name: host} of the brokered services, for telling the agent what exists. No tokens."""
+        return {n: s["host"] for n, s in self.broker.items()}
+
     def proxy_env(self):
         url = f"http://{ALIAS}:{PORT}"
-        return {"HTTPS_PROXY": url, "https_proxy": url, "HTTP_PROXY": url,
-                "http_proxy": url, "NO_PROXY": "", "no_proxy": ""}
+        env = {"HTTPS_PROXY": url, "https_proxy": url, "HTTP_PROXY": url,
+               "http_proxy": url, "NO_PROXY": "", "no_proxy": ""}
+        if self.broker:           # placeholders only: the real token exists nowhere a sandbox can reach
+            env["MINILOCKER_BROKER_URL"] = f"{url}/_broker"
+            env.update({f"MINILOCKER_TOKEN_{n.upper()}": s["placeholder"] for n, s in self.broker.items()})
+        return env
 
     def events_for(self, client_ip, since):
         raw = self.container.logs(since=int(since) - 1).decode(errors="replace")

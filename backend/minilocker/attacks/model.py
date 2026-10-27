@@ -32,6 +32,12 @@ def skip(detail):
     return (SKIP, detail)
 
 
+def rewind(to_snapshot: int) -> "Step":
+    """Not a tool call: the operator (here, the Attack Lab) rewinds the workspace to a snapshot before the next step runs.
+    Snapshot 0 is the pristine start; every step that changes the workspace adds one."""
+    return Step("control", {"rewind_to": to_snapshot}, "")
+
+
 class StepMissing(Exception):
     """A check referenced a step the loop never reached."""
 
@@ -127,3 +133,7 @@ class Attack:
     exec_timeout_s: int = 10
     needs_egress: bool = False
     needs_browser: bool = False     # needs the minilocker-browser image (docker build ...)
+
+    @property
+    def uses_control(self) -> bool:
+        return any(s.tool == "control" for s in self.steps)

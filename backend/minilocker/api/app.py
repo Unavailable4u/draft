@@ -24,8 +24,17 @@ HEARTBEAT_S = 15
 
 
 class TaskRequest(BaseModel):
-    task: str = Field(min_length=1, max_length=4000)
+    task: str = Field("", max_length=4000)
+    # A hero scenario by id: its files are placed in the workspace, its own text becomes the task, and its hidden check
+    # judges the outcome. The model never sees the check.
+    scenario: str | None = Field(None, max_length=40)
     profile: Literal["strict", "observe"] = "strict"
+    # Keep the sandbox open this many seconds after the agent stops, so its workspace can be looked at and rewound.
+    hold_s: int = Field(0, ge=0, le=900)
+
+
+class RewindRequest(BaseModel):
+    snapshot: int = Field(ge=0)
 
 
 class ApprovalRequest(BaseModel):
@@ -43,10 +52,11 @@ def _default_llm_factory():
 
 
 def _default_egress():
-    from minilocker.egress.manager import EgressManager
+    from minilocker.egress.manager import EgressManager, broker_from_env
     allow = os.environ.get("MINILOCKER_ALLOW", "pypi.org,files.pythonhosted.org").split(",")
     image = os.environ.get("MINILOCKER_PROXY_IMAGE")      # set when this process runs in a container
-    return EgressManager(allow, **({"image": image, "packaged": True} if image else {})).start()
+    return EgressManager(allow, broker=broker_from_env(),
+                         **({"image": image, "packaged": True} if image else {})).start()
 
 
 def _default_artifacts(tries=15, delay_s=2.0, sleep=None):
@@ -137,17 +147,40 @@ def create_app(runner=None, llm_factory=None, egress_factory=None, ledger_dir=No
 
     @app.post("/api/tasks", status_code=202, dependencies=[Depends(auth)])
     def create_task(body: TaskRequest, m: TaskManager = Depends(mgr)):
+        from minilocker.scenarios import SCENARIOS
+        sc = SCENARIOS.get(body.scenario) if body.scenario else None
+        if body.scenario and sc is None:
+            raise HTTPException(404, "unknown scenario")
+        task_text = sc.task if sc is not None else body.task.strip()
+        if not task_text:
+            raise HTTPException(422, "a task or a scenario is required")
         try:
             llm = make_llm()   # surface missing LLM_* config now, not inside the worker
         except Exception:
             raise HTTPException(503, "LLM is not configured (LLM_BASE_URL / LLM_MODEL / LLM_API_KEY)")
         try:
-            state = m.start(body.task, body.profile, llm)
+            state = m.start(task_text, body.profile, llm, hold_s=body.hold_s, scenario=sc)
         except TaskLimitError as e:
             raise HTTPException(429, str(e), headers={"Retry-After": "5"})
         return {"task_id": state.task_id, "status": state.status,
                 "events_url": f"/api/tasks/{state.task_id}/events",
                 "report_url": f"/api/tasks/{state.task_id}/report"}
+
+    @app.get("/api/scenarios", dependencies=[Depends(auth)])
+    def list_scenarios(request: Request):
+        """The hero scenarios a task can be started from. `available` is false when a scenario needs something this
+        deployment lacks (the browser image, or a host that is not on the allowlist)."""
+        from minilocker.sandbox.browser import image_present
+        from minilocker.scenarios import SCENARIOS
+        allowed = [h.strip() for h in os.environ.get("MINILOCKER_ALLOW", "pypi.org,files.pythonhosted.org").split(",") if h.strip()]
+        browser_ok = image_present() if any(s.needs_browser for s in SCENARIOS.values()) else True
+        out = []
+        for s in SCENARIOS.values():
+            missing = [h for h in s.allow if not any(h == a or h.endswith("." + a) for a in allowed)]
+            out.append({"id": s.id, "title": s.title, "task": s.task, "needs_browser": s.needs_browser,
+                        "allow": list(s.allow), "missing_hosts": missing,
+                        "available": (browser_ok or not s.needs_browser) and not missing})
+        return {"scenarios": out}
 
     @app.get("/api/tasks", dependencies=[Depends(auth)])
     def list_tasks(limit: int = Query(50, ge=1, le=200), m: TaskManager = Depends(mgr)):
@@ -164,6 +197,36 @@ def create_app(runner=None, llm_factory=None, egress_factory=None, ledger_dir=No
         rep = build_report(task_id, *loaded)   # restart case: summarise from disk
         return {"task_id": task_id, "task": rep["task"], "status": rep["outcome"],
                 "events": rep["ledger"]["events"], "result": None, "error": None}
+
+    @app.post("/api/tasks/{task_id}/rewind", status_code=202, dependencies=[Depends(auth)])
+    def rewind_task(task_id: str, body: RewindRequest, m: TaskManager = Depends(mgr)):
+        """Ask a running task to rewind /workspace to a snapshot. The loop carries it out at its next safe point and
+        records `rewind.requested` and `timeline.rewound` in the ledger; this only queues the request."""
+        r = m.rewind(task_id, body.snapshot)
+        if r == "unknown_task":
+            raise HTTPException(404, "unknown or not a running task")
+        if r == "closed":
+            raise HTTPException(409, "the task has ended: its sandbox no longer exists")
+        if r == "unsupported":
+            raise HTTPException(409, "this task's sandbox cannot snapshot")
+        if r == "unknown_snapshot":
+            raise HTTPException(404, "no such snapshot in this task's timeline")
+        return {"task_id": task_id, "snapshot": body.snapshot, "status": "queued"}
+
+    @app.post("/api/tasks/{task_id}/release", dependencies=[Depends(auth)])
+    def release_task(task_id: str, m: TaskManager = Depends(mgr)):
+        """End a `hold_s` hold early: destroy the sandbox now."""
+        if not m.release(task_id):
+            raise HTTPException(409, "the task is not running")
+        return {"task_id": task_id, "released": True}
+
+    @app.get("/api/infra", dependencies=[Depends(auth)])
+    def infra(request: Request):
+        """Where this runs and what it talks to. Read-only; never includes a secret."""
+        from minilocker.infra.status import collect
+        st = request.app.state
+        return collect(egress=getattr(st, "egress", None), artifacts=getattr(st, "artifacts", None),
+                       artifacts_error=getattr(st, "artifacts_error", None))
 
     @app.get("/api/tasks/{task_id}/events", dependencies=[Depends(auth)])
     async def stream_events(task_id: str, request: Request, after: int = Query(-1, ge=-1),

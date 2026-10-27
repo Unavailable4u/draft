@@ -7,11 +7,12 @@ const HIDDEN = new Set(["status", "note", "evidence"]);
 
 function fmt(v: unknown): string {
   if (v === null || v === undefined) return "—";
-  if (Array.isArray(v)) return v.length ? v.join(", ") : "—";
+  if (Array.isArray(v)) return v.length ? v.map(x => (x !== null && typeof x === "object" ? JSON.stringify(x) : String(x))).join(", ") : "—";
   if (typeof v === "object") {
     const e = Object.entries(v as Record<string, unknown>);
-    return e.length ? e.map(([k, x]) => `${k}: ${x}`).join(" · ") : "—";
+    return e.length ? e.map(([k, x]) => `${k}: ${fmt(x)}`).join(" · ") : "—";
   }
+  if (typeof v === "boolean") return v ? "yes" : "no";
   return String(v);
 }
 

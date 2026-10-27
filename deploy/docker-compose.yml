@@ -62,6 +62,11 @@ services:
     image: minilocker-api:latest
     restart: unless-stopped
     depends_on: [docker-proxy, storage]
+    # The credential broker's settings (MINILOCKER_BROKER and one MINILOCKER_BROKER_TOKEN_<NAME> per service) have names that
+    # depend on the services you configure, so they are read from deploy/.env directly. `environment:` below wins on a clash.
+    env_file:
+      - path: .env
+        required: false
     environment:
       DOCKER_HOST: tcp://docker-proxy:2375
       MINILOCKER_PROXY_IMAGE: minilocker-api:latest

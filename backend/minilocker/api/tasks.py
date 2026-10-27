@@ -2,6 +2,7 @@
 subscribers. run_task() is blocking and thread-based (ApprovalGate uses
 threading.Event), so the API owns the thread<->asyncio bridge here."""
 import asyncio
+import inspect
 import os
 import re
 import threading
@@ -9,6 +10,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
+from minilocker.agent.control import TaskControl
 from minilocker.ledger.chain import read_events
 from minilocker.ledger.summary import summarize
 from minilocker.policy.approvals import ApprovalGate
@@ -30,6 +32,9 @@ class TaskState:
         self.result = None
         self.error = None
         self.events: list[dict] = []
+        self.control = TaskControl()
+        self.scenario = None
+        self.hold_s = 0
         self._subs: list[tuple[asyncio.AbstractEventLoop, asyncio.Queue]] = []
         self._lock = threading.Lock()
 
@@ -62,7 +67,10 @@ class TaskState:
     def info(self):
         return {"task_id": self.task_id, "task": self.task, "profile": self.profile,
                 "status": self.status, "created": self.created,
-                "events": len(self.events), "result": self.result, "error": self.error}
+                "scenario": getattr(self.scenario, "id", None),
+                "events": len(self.events), "result": self.result, "error": self.error,
+                "control": {"rewind": self.control.enabled and self.control.is_open, "snapshots": self.control.snapshots,
+                            "hold_s": self.hold_s}}
 
 
 class TaskManager:
@@ -83,13 +91,17 @@ class TaskManager:
         os.makedirs(ledger_dir, exist_ok=True)
 
     # ---- tasks -----------------------------------------------------------
-    def start(self, task: str, profile: str, llm) -> TaskState:
+    def start(self, task: str, profile: str, llm, hold_s: int = 0, scenario=None) -> TaskState:
+        """`scenario` (a minilocker.scenarios.Scenario) supplies the task's files, its success check and its budgets;
+        `task` is then the scenario's own text."""
         with self._lock:
             if self._active >= self.max_concurrent:
                 raise TaskLimitError(f"{self.max_concurrent} tasks already running")
             self._active += 1
         task_id = uuid.uuid4().hex[:8]
         state = TaskState(task_id, task, profile)
+        state.hold_s = hold_s
+        state.scenario = scenario
         self.tasks[task_id] = state
         try:
             self._pool.submit(self._run, state, llm)
@@ -117,9 +129,19 @@ class TaskManager:
     def _run(self, state, llm):
         try:
             extra = {"artifacts": self.artifacts} if self.artifacts is not None else {}
+            takes = inspect.signature(self.runner).parameters
+            wide = any(p.kind is inspect.Parameter.VAR_KEYWORD for p in takes.values())
+            if wide or "control" in takes:
+                extra["control"] = state.control
+            if state.hold_s and (wide or "hold_s" in takes):
+                extra["hold_s"] = state.hold_s
+            sc = state.scenario
+            if sc is not None and (wide or {"files", "verify"} <= set(takes)):
+                extra["files"], extra["verify"] = sc.files or None, sc.verify
             result = self.runner(
                 state.task, llm, ledger_dir=self.ledger_dir, egress=self.egress,
-                policy=PolicyEngine(state.profile), approver=self.gate.ask,
+                policy=PolicyEngine(state.profile, sc.budgets) if sc is not None else PolicyEngine(state.profile),
+                approver=self.gate.ask,
                 on_event=lambda ev: self._on_event(state, ev), task_id=state.task_id, **extra)
             state.result = result
             state.status = result.get("status", "finished")
@@ -129,12 +151,25 @@ class TaskManager:
             state.error = f"{type(e).__name__}"
             state.status = "error"
         finally:
+            state.control.close()
             with self._lock:
                 self._active -= 1
             state.close()
 
     def get(self, task_id) -> TaskState | None:
         return self.tasks.get(task_id)
+
+    def rewind(self, task_id, snapshot_id) -> str:
+        """'unknown_task' | 'closed' | 'unsupported' | 'unknown_snapshot' | 'queued'. The loop does the rewinding."""
+        st = self.tasks.get(task_id)
+        return "unknown_task" if st is None else st.control.request_rewind(snapshot_id)
+
+    def release(self, task_id) -> bool:
+        st = self.tasks.get(task_id)
+        if st is None or not st.control.is_open:
+            return False
+        st.control.release()
+        return True
 
     # ---- ledger on disk --------------------------------------------------
     def ledger_path(self, task_id):

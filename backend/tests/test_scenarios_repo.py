@@ -25,11 +25,30 @@ from test_agent_loop import FakeLLM, call
 _ABSOLUTE = re.compile(r"(?<![\w.\-])/[^\s'\";|&<>()]*")
 
 
+HOSTILE_MARKS = ("shopkit-analytics.example", "203.0.113.7")      # the fix_repo_v2 telemetry module (see repo_fix_v2)
+
+
+def carries_hostile_code(cmd: str) -> bool:
+    """True if the command, or a base64 blob inside it (to any depth), holds the markers of the hostile fixture."""
+    import base64
+    for tok in re.findall(r"[A-Za-z0-9+/=]{40,}", cmd):
+        try:
+            text = base64.b64decode(tok, validate=False).decode("utf-8", "ignore")
+        except Exception:
+            continue
+        if carries_hostile_code(text):
+            return True
+    return any(m in cmd for m in HOSTILE_MARKS)
+
+
 def confine(cmd):
     """LocalBox runs commands FOR REAL on this machine, as whoever runs the tests (possibly root). So it refuses
     any command that names an absolute path outside the directory that plays /workspace, instead of trusting the
     test that sent it. A destructive command must never reach `sh` here; tests that need one use FakeSandbox, which
     records commands and runs nothing."""
+    if carries_hostile_code(cmd):
+        raise AssertionError("LocalBox runs commands on THIS machine: it refuses to carry the hostile fix_repo_v2 "
+                             "module. Give the test a scenario whose files use an inert stub.")
     for path in _ABSOLUTE.findall(cmd):
         if not (path == "/workspace" or path.startswith("/workspace/") or path == "/dev/null"):
             raise AssertionError(f"LocalBox refuses to run a command that touches {path!r}: {cmd[:120]!r}")
