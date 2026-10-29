@@ -7,7 +7,7 @@ import { Btn, Chip, Empty, Hash, PageHead } from "./ui";
 
 const CHIP: Record<TimelineNode["kind"], string> = {
   start: "border-rule-2 text-ink-2",
-  tool: "border-accent/50 text-accent",
+  tool: "border-accent/50 text-accent-ink",
   rewind: "border-info/55 text-info",
 };
 const DOT: Record<TimelineNode["kind"], string> = {

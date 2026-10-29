@@ -16,9 +16,9 @@ const CM_FONT = `"CMU Typewriter Text", ${FALLBACK_FONT}`;
 
 /** The terminal is always a dark "listing", in both themes, so output stays the focal point of the page. */
 const THEME = {
-  background: "#070a12", foreground: "#e9e4d6", cursor: "#a3b9ff", selectionBackground: "#2b3a6b",
-  black: "#070a12", red: "#ff8070", green: "#62d7a1", yellow: "#f4c55f", blue: "#8fb2f2", magenta: "#c9a0e8", cyan: "#84d0e8", white: "#e9e4d6",
-  brightBlack: "#8b90a3", brightRed: "#ffa296", brightGreen: "#8be6bb", brightYellow: "#f8d98d", brightBlue: "#aec7f6", brightMagenta: "#dbbcf0", brightCyan: "#a6dcee", brightWhite: "#fbf7ea",
+  background: "#08080b", foreground: "#f2f1ed", cursor: "#ff2052", selectionBackground: "rgba(255, 32, 82, 0.28)",
+  black: "#08080b", red: "#ff5a4f", green: "#5b9dff", yellow: "#f59e0b", blue: "#b39cff", magenta: "#f06cb4", cyan: "#5be3d0", white: "#f2f1ed",
+  brightBlack: "#8e8c86", brightRed: "#ff8a80", brightGreen: "#8fbcff", brightYellow: "#fbbf24", brightBlue: "#cdbfff", brightMagenta: "#f9a8d4", brightCyan: "#99f0e2", brightWhite: "#ffffff",
 };
 
 function render(e: LedgerEvent): string {
@@ -106,9 +106,9 @@ export function TerminalView({ events }: { events: LedgerEvent[] }) {
     <div className="relative flex h-full flex-col bg-term">
       <div className="flex shrink-0 items-center gap-3 border-b border-white/10 bg-white/[.025] px-3.5 py-2.5 text-term-dim">
         <span aria-hidden className="flex gap-1.5">
-          <i className="h-2.5 w-2.5 rounded-full bg-[#f0877b]/80" /><i className="h-2.5 w-2.5 rounded-full bg-[#e8c16d]/80" /><i className="h-2.5 w-2.5 rounded-full bg-[#8fd1a4]/80" />
+          <i className="h-2.5 w-2.5 rounded-full bg-bad/80" /><i className="h-2.5 w-2.5 rounded-full bg-warn/80" /><i className="h-2.5 w-2.5 rounded-full bg-ok/80" />
         </span>
-        <span className="font-mono text-[0.8rem]"><span className="text-[#62d7a1]">●</span> sandbox <span className="text-term-fg/60">·</span> /workspace</span>
+        <span className="font-mono text-[0.8rem]"><span className="text-ok">●</span> sandbox <span className="text-term-fg/60">·</span> /workspace</span>
         <span className="ml-auto text-[0.8rem] italic tabular-nums">{events.length} ledger event{events.length === 1 ? "" : "s"}</span>
       </div>
       <div ref={el} className="min-h-0 flex-1 px-3 py-2" />

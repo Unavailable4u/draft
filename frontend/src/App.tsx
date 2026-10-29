@@ -138,14 +138,21 @@ export default function App() {
   const apply = () => { const v = token.trim(); setToken(v); setTok(v); setApplied(v); };
   return (
     <div className="flex h-full flex-col text-ink">
+      <svg width="0" height="0" aria-hidden className="absolute">
+        <defs>
+          <linearGradient id="mlk-ok" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stopColor="var(--ok-a)" /><stop offset=".55" stopColor="var(--ok-b)" /><stop offset="1" stopColor="var(--ok-c)" />
+          </linearGradient>
+        </defs>
+      </svg>
       <header className="relative z-10 shrink-0 border-b border-rule bg-paper/75 backdrop-blur-md">
         <div className="flex items-stretch gap-5 px-5 xl:gap-8">
-          <div className="flex items-center gap-3 py-2.5 text-accent">
+          <div className="flex items-center gap-3 py-2.5 text-ink-2">
             <span className="grid h-10 w-10 place-items-center rounded-full border border-rule-2 bg-sheet shadow-[0_0_22px_-6px_var(--accent)]">
               <Mark size={30} />
             </span>
             <div className="leading-none">
-              <div className="display text-[1.55rem] text-ink">MiniLocker</div>
+              <div className="display text-[1.55rem] text-ink">Mini<span className="text-accent-ink">Locker</span></div>
               <div className="smcp mt-1 hidden text-[0.74rem] text-ink-3 xl:block">a blast-radius ledger for AI agents</div>
             </div>
           </div>
@@ -159,7 +166,7 @@ export default function App() {
                   screen === s.id ? "font-bold text-ink" : "text-ink-2 hover:text-ink"
                 }`}
               >
-                <span className={`text-[0.78rem] italic ${screen === s.id ? "text-accent" : "text-ink-3"}`}>{i + 1}</span>
+                <span className={`text-[0.78rem] italic ${screen === s.id ? "text-accent-ink" : "text-ink-3"}`}>{i + 1}</span>
                 {s.label}
                 {screen === s.id && <span aria-hidden className="absolute inset-x-2 bottom-0 h-[3px] rounded-t-full bg-accent" style={{ boxShadow: "0 0 14px var(--accent)" }} />}
               </button>

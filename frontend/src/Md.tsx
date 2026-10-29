@@ -17,7 +17,7 @@ export function Md({ children }: { children: string }) {
         <pre className="my-1.5 overflow-x-auto rounded-[5px] border border-rule bg-sunken p-2.5 font-mono text-[0.82rem] leading-relaxed [&_code]:border-0 [&_code]:bg-transparent [&_code]:p-0">{children}</pre>
       ),
       a: ({ href, children }) => (
-        <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent underline decoration-accent/40 underline-offset-2 hover:decoration-accent">{children}</a>
+        <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent-ink underline decoration-accent/40 underline-offset-2 hover:decoration-accent">{children}</a>
       ),
     }}>{children}</ReactMarkdown>
   );

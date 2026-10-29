@@ -20,7 +20,7 @@ function Panel({ no, title, badge, tone = "info", children, delay = 0 }: {
     <Card className="p-4">
       <div style={{ animationDelay: `${delay}ms` }} className="rise">
         <div className="flex items-baseline gap-2.5">
-          <span className="italic text-accent">§{no}</span>
+          <span className="italic text-accent-ink">§{no}</span>
           <h3 className="text-[1.15rem] font-bold text-ink">{title}</h3>
           {badge && <Chip tone={t} dot={tone !== "info"} className="ml-auto">{badge}</Chip>}
         </div>

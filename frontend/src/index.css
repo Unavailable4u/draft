@@ -1,60 +1,69 @@
 @import "tailwindcss";
 
 /* ───────────────────────── Design tokens ─────────────────────────
-   "The typeset instrument": a measuring device set like a journal article.
-   Computer Modern throughout, engineering-paper grid, one cool accent, and a status palette that means
-   exactly one thing each (green = clean, red = flagged, amber = needs a human, blue = information).
-   Midnight is the default; Paper is the same hierarchy on ivory. */
+   "The typeset instrument", re-toned: a near-black graphite room, warm off-white ink, ONE crimson accent.
+   Status colours keep a single meaning each (green = clean, vermilion = flagged, amber = needs a human,
+   blue = information) and violet is ambience only, never a status. The accent is split in two: a fill that
+   white text can sit on, and a lighter "ink" version for accent-coloured text.
+   Graphite is the default; Paper is the same hierarchy on warm ivory-grey. */
 :root {
   color-scheme: light;
-  --paper: #f3eee0;
-  --sheet: #fcfaf2;
-  --raised: #fffdf7;
-  --sunken: #ece6d3;
-  --rule: #d9d0b8;
-  --rule-2: #c3b99d;
-  --ink: #171b2b;
-  --ink-2: #474c60;
-  --ink-3: #6c6f80;
-  --accent: #213a7d;
-  --accent-2: #3f63c4;
-  --on-accent: #f8f4e8;
-  --ok: #1f7049;     --ok-wash: #dfeadb;
-  --bad: #ad2f27;    --bad-wash: #f5dcd4;
-  --warn: #8d5f0a;   --warn-wash: #f2e5bd;  --on-warn: #fffaf0;
-  --info: #1f6f8b;   --info-wash: #d9e9ef;
-  --term-bg: #10131c;
-  --term-fg: #e9e4d6;
-  --term-dim: #8b90a3;
-  --grid: rgba(70, 58, 20, 0.055);
-  --glow-a: rgba(63, 99, 196, 0.10);
-  --glow-b: rgba(31, 112, 73, 0.06);
-  --elev-panel: 0 1px 0 rgba(255, 255, 255, .7) inset, 0 1px 0 var(--rule), 0 18px 34px -26px rgba(52, 40, 8, .55);
-  --elev-lift: 0 24px 60px -24px rgba(40, 30, 6, .5);
+  --paper: #f2f0eb;
+  --sheet: #faf9f6;
+  --raised: #ffffff;
+  --sunken: #e9e6df;
+  --rule: #d9d5cb;
+  --rule-2: #bfbaad;
+  --ink: #121216;
+  --ink-2: #44434a;
+  --ink-3: #6a6972;
+  --accent: #d90f3d;
+  --accent-ink: #c20c36;
+  --accent-2: #7c5cd6;
+  --on-accent: #ffffff;
+  --ok: #1d4ed8;     --ok-wash: #dfe4f2;
+  --bad: #c8321f;    --bad-wash: #f4dfda;
+  --warn: #9a5800;   --warn-wash: #eee4d6;  --on-warn: #fffaf0;
+  --info: #6d4fc4;   --info-wash: #e9e5f0;
+  --ok-a: #1a3fc4; --ok-b: #2f6fe8; --ok-c: #5b9cf5;
+  --ok-grad: linear-gradient(135deg, var(--ok-a), var(--ok-b) 55%, var(--ok-c));
+  --term-bg: #09090c;
+  --term-fg: #f2f1ed;
+  --term-dim: #8e8c86;
+  --grid: rgba(60, 40, 40, 0.05);
+  --glow-a: rgba(217, 15, 61, 0.08);
+  --glow-b: rgba(124, 92, 214, 0.07);
+  --elev-panel: 0 1px 0 rgba(255, 255, 255, .8) inset, 0 1px 0 var(--rule), 0 18px 34px -26px rgba(40, 30, 30, .45);
+  --elev-lift: 0 24px 60px -24px rgba(30, 20, 20, .45);
 }
 [data-theme="dark"] {
   color-scheme: dark;
-  --paper: #080b14;
-  --sheet: #0e1322;
-  --raised: #141b30;
-  --sunken: #060910;
-  --rule: #1f2740;
-  --rule-2: #2d3857;
-  --ink: #ede8d9;
-  --ink-2: #b7bcd1;
-  --ink-3: #8991ad;
-  --accent: #a3b9ff;
-  --accent-2: #7f9cff;
-  --on-accent: #0a1022;
-  --ok: #62d7a1;     --ok-wash: #0e2a21;
-  --bad: #ff8070;    --bad-wash: #2c1416;
-  --warn: #f4c55f;   --warn-wash: #2b2410;  --on-warn: #1b1405;
-  --info: #84d0e8;   --info-wash: #0e2530;
-  --term-bg: #070a12;
-  --grid: rgba(150, 175, 255, 0.04);
-  --glow-a: rgba(127, 156, 255, 0.13);
-  --glow-b: rgba(98, 215, 161, 0.07);
-  --elev-panel: 0 1px 0 rgba(255, 255, 255, .045) inset, 0 20px 40px -28px rgba(0, 0, 0, .9);
+  --paper: #0a0a0c;
+  --sheet: #121216;
+  --raised: #17171d;
+  --sunken: #08080b;
+  --rule: #26262e;
+  --rule-2: #353541;
+  --ink: #f2f1ed;
+  --ink-2: #b4b2ab;
+  --ink-3: #8e8c86;
+  --accent: #f01a49;
+  --accent-ink: #ff7a96;
+  --accent-2: #a78bfa;
+  --on-accent: #ffffff;
+  --ok: #5b9dff;     --ok-wash: #1c2537;
+  --bad: #ff5a4f;    --bad-wash: #2c1a1c;
+  --warn: #f59e0b;   --warn-wash: #2b2115;  --on-warn: #1b1405;
+  --info: #b39cff;   --info-wash: #292537;
+  --ok-a: #1f46d9; --ok-b: #3f86ff; --ok-c: #86bcff;
+  --ok-grad: linear-gradient(135deg, var(--ok-a), var(--ok-b) 55%, var(--ok-c));
+  --term-bg: #08080b;
+  --term-fg: #f2f1ed;
+  --term-dim: #8e8c86;
+  --grid: rgba(255, 32, 82, 0.03);
+  --glow-a: rgba(255, 32, 82, 0.09);
+  --glow-b: rgba(167, 139, 250, 0.06);
+  --elev-panel: 0 1px 0 rgba(255, 255, 255, .04) inset, 0 20px 40px -28px rgba(0, 0, 0, .9);
   --elev-lift: 0 30px 80px -24px rgba(0, 0, 0, .85);
 }
 
@@ -69,6 +78,7 @@
   --color-ink-2: var(--ink-2);
   --color-ink-3: var(--ink-3);
   --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
   --color-accent-2: var(--accent-2);
   --color-on-accent: var(--on-accent);
   --color-ok: var(--ok);
@@ -118,7 +128,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: non
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; }
 code, pre, kbd, samp { font-family: var(--font-mono); }
-select { appearance: none; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none' stroke='%238991ad' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M1 1l4 4 4-4'/></svg>"); background-repeat: no-repeat; background-position: right .7rem center; padding-right: 2rem !important; }
+select { appearance: none; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none' stroke='%238e8c86' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M1 1l4 4 4-4'/></svg>"); background-repeat: no-repeat; background-position: right .7rem center; padding-right: 2rem !important; }
 
 * { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--ink) 22%, transparent) transparent; }
 
@@ -142,14 +152,22 @@ details > summary:hover { color: var(--ink); }
   }
   .hairline-accent {
     height: 1px;
-    background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 0%, transparent) 78%);
-    opacity: .55;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2) 42%, transparent 82%);
+    opacity: .6;
   }
 }
 
+/* "clean" is a deep blue that brightens along its length, wherever it is drawn as a fill */
+.bg-ok { background-image: var(--ok-grad); }
+
 /* a soft halo for light-on-dark marks; on paper it would only blur them */
-.glow { filter: drop-shadow(0 0 4px var(--glow-c, currentColor)); }
+.glow { filter: drop-shadow(0 0 3px color-mix(in srgb, var(--glow-c, currentColor) 55%, transparent)); }
 [data-theme="light"] .glow { filter: none; }
+
+/* flagged things get diagonal hatching as well as colour, so red never has to carry the meaning alone */
+@utility hatch-bad {
+  background-image: repeating-linear-gradient(135deg, transparent 0 5px, color-mix(in srgb, var(--bad) 16%, transparent) 5px 6px);
+}
 
 /* ───────────────────────── Typographic utilities ───────────────────────── */
 @utility smcp {

@@ -107,7 +107,7 @@ function DimensionCard({ no, name, d, delay }: { no: number; name: string; d: Di
     <Card className="p-4">
       <div style={{ animationDelay: `${delay}ms` }} className="rise">
         <div className="flex items-baseline gap-2.5">
-          <span className="italic text-accent">§{no}</span>
+          <span className="italic text-accent-ink">§{no}</span>
           <h3 className="text-[1.15rem] font-bold capitalize text-ink">{name.replace(/_/g, " ")}</h3>
           <Chip tone={tone} dot={d.status === "measured"} className="ml-auto">{d.status.replace("_", " ")}</Chip>
         </div>
@@ -197,7 +197,7 @@ export function ReportScreen({ taskId, done }: { taskId: string | null; done: bo
             <Mark size={340} className="pointer-events-none absolute -right-20 -top-24 text-ink opacity-[.045]" />
             <div className="relative flex items-start gap-8">
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2 text-ink-3"><Label className="text-[0.95rem] text-accent">Blast Radius Report</Label><span aria-hidden>·</span><span className="font-mono text-[0.85rem]">{report.task_id}</span></div>
+                <div className="flex items-center gap-2 text-ink-3"><Label className="text-[0.95rem] text-accent-ink">Blast Radius Report</Label><span aria-hidden>·</span><span className="font-mono text-[0.85rem]">{report.task_id}</span></div>
                 <h1 className="display mt-2.5 text-[2rem] leading-[1.14] text-ink">{report.task}</h1>
                 {report.summary && (
                   <p className="mt-4 border-l-2 border-accent/70 pl-4 leading-relaxed text-ink-2">

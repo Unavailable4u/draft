@@ -25,15 +25,15 @@ export const FIELD =
 /** A code listing: sunken, hair-ruled, typewriter face. */
 export const LISTING = "rounded-[5px] border border-rule bg-sunken font-mono text-[0.82rem] leading-relaxed text-ink";
 
-/** The brand mark: concentric rings around a vermilion point, a blast radius. */
+/** The brand mark: concentric rings around a crimson point, a blast radius. */
 export function Mark({ size = 28, className = "" }: { size?: number; className?: string }) {
   return (
     <svg width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden className={className}>
       <circle cx="16" cy="16" r="14.8" stroke="currentColor" strokeWidth="1" strokeDasharray="1.2 2.4" opacity=".5" />
       <circle cx="16" cy="16" r="10.4" stroke="currentColor" strokeWidth="1.2" opacity=".78" />
       <circle cx="16" cy="16" r="6" stroke="currentColor" strokeWidth="1.7" />
-      <circle cx="16" cy="16" r="4.4" fill="var(--bad)" opacity=".18" />
-      <circle cx="16" cy="16" r="2.2" fill="var(--bad)" />
+      <circle cx="16" cy="16" r="4.4" fill="var(--accent)" opacity=".2" />
+      <circle cx="16" cy="16" r="2.2" fill="var(--accent)" />
     </svg>
   );
 }
@@ -52,7 +52,7 @@ export function Chip({ tone = "mute", children, title, className = "", dot = fal
 }) {
   return (
     <span title={title}
-      className={`smcp inline-flex items-center gap-1.5 whitespace-nowrap rounded-[4px] border px-1.5 py-px text-[0.8rem] leading-tight ${EDGE[tone]} ${INK[tone]} ${tone === "mute" ? "" : WASH[tone]} ${className}`}>
+      className={`smcp inline-flex items-center gap-1.5 whitespace-nowrap rounded-[4px] border px-1.5 py-px text-[0.8rem] leading-tight ${EDGE[tone]} ${INK[tone]} ${tone === "mute" ? "" : WASH[tone]} ${tone === "bad" ? "hatch-bad" : ""} ${className}`}>
       {dot && <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${BAR[tone]}`} />}
       {children}
     </span>
@@ -61,7 +61,7 @@ export function Chip({ tone = "mute", children, title, className = "", dot = fal
 
 type Variant = "primary" | "ghost" | "danger" | "warn" | "info";
 const VARIANT: Record<Variant, string> = {
-  primary: "border-accent/80 bg-accent text-on-accent font-bold shadow-[0_1px_0_rgba(255,255,255,.35)_inset,0_10px_24px_-12px_var(--accent)] hover:brightness-110",
+  primary: "border-accent/80 bg-accent text-on-accent font-bold shadow-[0_1px_0_rgba(255,255,255,.22)_inset,0_10px_26px_-12px_var(--accent)] hover:brightness-110",
   ghost: "border-rule-2 bg-raised text-ink hover:border-ink-3 hover:bg-sheet",
   danger: "border-bad/60 bg-transparent text-bad hover:bg-bad-wash",
   warn: "border-warn bg-warn text-on-warn font-bold hover:brightness-105",
@@ -105,7 +105,7 @@ export function SectionHead({ no, title, note, right, className = "" }: {
   return (
     <div className={className}>
       <div className="flex items-baseline gap-2.5 pb-1.5">
-        {no !== undefined && <span className="italic text-accent">§{no}</span>}
+        {no !== undefined && <span className="italic text-accent-ink">§{no}</span>}
         <h3 className="text-[1.12rem] font-bold tracking-tight text-ink">{title}</h3>
         {note && <span className="text-[0.85rem] italic text-ink-2">{note}</span>}
         {right && <span className="ml-auto">{right}</span>}
@@ -120,7 +120,7 @@ export function PageHead({ eyebrow, title, sub, right }: { eyebrow?: ReactNode; 
   return (
     <header className="rise relative flex items-end gap-4 pb-3">
       <div className="min-w-0">
-        {eyebrow && <Label className="block text-[0.86rem] text-accent">{eyebrow}</Label>}
+        {eyebrow && <Label className="block text-[0.86rem] text-accent-ink">{eyebrow}</Label>}
         <h2 className="display mt-0.5 text-[2.5rem] text-ink">{title}</h2>
         {sub && <p className="mt-1.5 max-w-2xl text-[1.02rem] italic leading-snug text-ink-2">{sub}</p>}
       </div>
@@ -178,7 +178,7 @@ export function Donut({ segments, total, size = 132, stroke = 11, children, labe
           const len = (s.value / total) * 100, off = -at;
           at += len;
           return (
-            <circle key={i} cx="50" cy="50" r={r} fill="none" stroke={VAR[s.tone]} strokeWidth={stroke} pathLength={100}
+            <circle key={i} cx="50" cy="50" r={r} fill="none" stroke={s.tone === "ok" ? "url(#mlk-ok)" : VAR[s.tone]} strokeWidth={stroke} pathLength={100}
               strokeDasharray={`${Math.max(0, len - 1.2)} ${100 - Math.max(0, len - 1.2)}`} strokeDashoffset={off} strokeLinecap="butt"
               className="glow" style={{ ["--glow-c" as string]: VAR[s.tone], transition: "stroke-dasharray .7s ease" }} />
           );
@@ -195,7 +195,7 @@ export function Seal({ state, title, children }: { state: "ok" | "bad" | "idle";
   const tone: Tint = state === "ok" ? "ok" : state === "bad" ? "bad" : "mute";
   const ring = state === "ok" ? "CHAIN VERIFIED" : state === "bad" ? "CHAIN BROKEN" : "UNVERIFIED";
   return (
-    <div role="status" className={`flex items-center gap-4 rounded-[7px] border p-3.5 ${EDGE[tone]} ${state === "idle" ? "bg-sheet" : WASH[tone]}`}>
+    <div role="status" className={`flex items-center gap-4 rounded-[7px] border p-3.5 ${EDGE[tone]} ${state === "idle" ? "bg-sheet" : WASH[tone]} ${state === "bad" ? "hatch-bad" : ""}`}>
       <svg viewBox="0 0 100 100" className={`h-[5.6rem] w-[5.6rem] shrink-0 ${INK[tone]}`} aria-hidden>
         <defs><path id={`${id}c`} d="M50,50 m-35,0 a35,35 0 1,1 70,0 a35,35 0 1,1 -70,0" /></defs>
         <circle cx="50" cy="50" r="48" fill="none" stroke="currentColor" strokeWidth="1.5" />

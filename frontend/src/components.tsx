@@ -125,7 +125,7 @@ function Step({ e, calls, lastText }: { e: LedgerEvent; calls: number; lastText:
     return p.text ? (
       <Entry dot="bg-accent">
         <div className="rounded-[6px] border border-rule bg-sheet/80 px-3 py-2 leading-relaxed text-ink">
-          <Label className="block text-[0.78rem] text-accent">Agent</Label>
+          <Label className="block text-[0.78rem] text-accent-ink">Agent</Label>
           <Md>{p.text}</Md>
         </div>
       </Entry>
@@ -297,7 +297,7 @@ function RadiusDial({ gauges, phase }: { gauges: G[]; phase: Phase }) {
     if (d.tone === "bad") return { stroke: "var(--bad)", width: 8, dash: "9 4.5", glow: true, pulse: true, o: 1 };
     if (d.tone === "warn") return { stroke: "var(--warn)", width: 8, dash: "13 5", glow: true, pulse: false, o: 1 };
     void i;
-    return { stroke: "var(--ok)", width: 8, dash: undefined as string | undefined, glow: true, pulse: false, o: 0.95 };
+    return { stroke: "url(#mlk-ok)", width: 8, dash: undefined as string | undefined, glow: true, pulse: false, o: 0.95 };
   };
   return (
     <Card className="rise overflow-hidden p-4 pb-3">
@@ -322,12 +322,12 @@ function RadiusDial({ gauges, phase }: { gauges: G[]; phase: Phase }) {
             <g key={d.key}>
               <path d={arcPath(r)} fill="none" stroke="var(--rule)" strokeWidth="8" strokeLinecap="round" opacity=".85" />
               <path d={arcPath(r)} fill="none" stroke={s.stroke} strokeWidth={s.width} strokeDasharray={s.dash} strokeLinecap="round" opacity={s.o}
-                className={`dial-in ${s.glow ? "glow" : ""} ${s.pulse ? "breathe" : ""}`} style={{ animationDelay: `${i * 90}ms`, ["--glow-c" as string]: s.stroke }}>
+                className={`dial-in ${s.glow ? "glow" : ""} ${s.pulse ? "breathe" : ""}`} style={{ animationDelay: `${i * 90}ms`, ["--glow-c" as string]: d.tone === "ok" ? "var(--ok)" : s.stroke }}>
                 <title>{`${d.label}: ${d.measured ? `${d.value}${d.unit ? ` ${d.unit}` : ""}` : "not measured yet"}`}</title>
               </path>
               <text x={CX - 8} y={CY - r + 3.8} textAnchor="end" fontSize="11.5">
                 <tspan fill="var(--ink-2)">{d.label}</tspan>
-                <tspan dx="6" fontWeight="700" fill={d.measured ? s.stroke : "var(--ink-3)"}>{d.measured ? `${d.value}${d.unit ? ` ${d.unit}` : ""}` : "—"}</tspan>
+                <tspan dx="6" fontWeight="700" fill={d.measured ? VAR[d.tone] : "var(--ink-3)"}>{d.measured ? `${d.value}${d.unit ? ` ${d.unit}` : ""}` : "—"}</tspan>
               </text>
             </g>
           );
