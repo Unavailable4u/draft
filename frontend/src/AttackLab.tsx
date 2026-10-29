@@ -1,89 +1,129 @@
 import { useEffect, useState } from "react";
 import type { AttackCheck, AttackInfo, AttackResult, AttackStep, CheckStatus, Verdict } from "./api";
 import type { AttackLabApi, Run } from "./useAttacks";
+import { Btn, Card, Chip, Donut, EDGE, INK, LISTING, Label, SectionHead, Spin, WASH } from "./ui";
+import type { Tint } from "./ui";
 
-const VERDICT: Record<Verdict, { label: string; mark: string; text: string; box: string }> = {
-  contained: { label: "Contained", mark: "✓", text: "text-emerald-400", box: "border-emerald-800 bg-emerald-950/30" },
-  breached: { label: "Breached", mark: "✗", text: "text-red-400", box: "border-red-800 bg-red-950/30" },
-  inconclusive: { label: "Inconclusive", mark: "?", text: "text-amber-400", box: "border-amber-800 bg-amber-950/30" },
-  error: { label: "Could not run", mark: "!", text: "text-red-400", box: "border-red-800 bg-red-950/30" },
-  unavailable: { label: "Unavailable", mark: "–", text: "text-zinc-400", box: "border-zinc-700 bg-zinc-900" },
+const VERDICT: Record<Verdict, { label: string; mark: string; tone: Tint }> = {
+  contained: { label: "Contained", mark: "✓", tone: "ok" },
+  breached: { label: "Breached", mark: "✗", tone: "bad" },
+  inconclusive: { label: "Inconclusive", mark: "?", tone: "warn" },
+  error: { label: "Could not run", mark: "!", tone: "bad" },
+  unavailable: { label: "Unavailable", mark: "–", tone: "mute" },
 };
-const CHECK: Record<CheckStatus, { mark: string; text: string; word: string }> = {
-  pass: { mark: "✓", text: "text-emerald-400", word: "passed" },
-  fail: { mark: "✗", text: "text-red-400", word: "failed" },
-  unproven: { mark: "?", text: "text-amber-400", word: "not proven" },
-  skip: { mark: "–", text: "text-zinc-500", word: "skipped" },
+const CHECK: Record<CheckStatus, { mark: string; tone: Tint; word: string }> = {
+  pass: { mark: "✓", tone: "ok", word: "passed" },
+  fail: { mark: "✗", tone: "bad", word: "failed" },
+  unproven: { mark: "?", tone: "warn", word: "not proven" },
+  skip: { mark: "–", tone: "mute", word: "skipped" },
 };
 const VERDICT_HELP: Partial<Record<Verdict, string>> = {
   inconclusive: "Nothing was damaged, but the attack did not exercise every property it targets, so containment is not proven.",
   breached: "At least one containment property failed. Open the checks below.",
 };
-const FOCUS = "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-emerald-500";
 
 function verdictOf(r: Run | undefined): Verdict | null {
   if (!r || r.state === "running") return null;
   return r.state === "done" ? r.result.verdict : "error";
 }
 
-function Summary({ lab }: { lab: AttackLabApi }) {
+/** One tile of the verdict matrix: one attack, one colour, one glyph. */
+function tileOf(a: AttackInfo, r: Run | undefined): { cls: string; mark: string; label: string } {
+  if (r?.state === "running") return { cls: "border-info bg-info-wash text-info animate-pulse", mark: "…", label: "running" };
+  const v = verdictOf(r);
+  if (v === "contained") return { cls: "border-ok/60 bg-ok-wash text-ok", mark: "✓", label: "contained" };
+  if (v === "breached") return { cls: "border-bad bg-bad-wash text-bad", mark: "✗", label: "breached" };
+  if (v === "inconclusive") return { cls: "border-warn/70 bg-warn-wash text-warn", mark: "?", label: "inconclusive" };
+  if (v === "error") return { cls: "border-bad/60 bg-bad-wash text-bad", mark: "!", label: "could not run" };
+  if (!a.available) return { cls: "border-dashed border-ink-3/50 text-ink-3", mark: "–", label: "unavailable" };
+  return { cls: "border-rule bg-sunken text-ink-3", mark: "·", label: "not run" };
+}
+
+function Summary({ lab, sel, onPick }: { lab: AttackLabApi; sel: string; onPick: (n: string) => void }) {
   const list = lab.attacks ?? [];
   const runnable = list.filter(a => a.available).length;
   const tally: Record<string, number> = {};
   for (const a of list) { const v = verdictOf(lab.runs[a.name]); if (v) tally[v] = (tally[v] ?? 0) + 1; }
   const contained = tally.contained ?? 0, notRun = runnable - Object.entries(tally).filter(([k]) => k !== "unavailable").reduce((n, [, v]) => n + v, 0);
-  const worst = tally.breached ? "text-red-400" : tally.inconclusive || tally.error ? "text-amber-400" : contained && !notRun ? "text-emerald-400" : "text-zinc-200";
+  const worst: Tint = tally.breached ? "bad" : tally.inconclusive || tally.error ? "warn" : contained && !notRun ? "ok" : "mute";
   return (
-    <div className="flex items-center gap-6 border-b border-zinc-800 px-4 py-3">
-      <div>
-        <div className={`text-4xl font-semibold tabular-nums ${worst}`}>{contained}<span className="text-zinc-600">/{runnable}</span></div>
-        <div className="text-xs text-zinc-500">attacks contained</div>
+    <div className="shrink-0 border-b border-rule bg-sheet/50 px-6 py-4 backdrop-blur">
+      <div className="mx-auto flex max-w-[96rem] items-center gap-7">
+        <Donut size={116} stroke={10} total={Math.max(1, runnable)} label={`${contained} of ${runnable} attacks contained`}
+          segments={[{ value: contained, tone: "ok" }, { value: tally.inconclusive ?? 0, tone: "warn" },
+            { value: (tally.breached ?? 0) + (tally.error ?? 0), tone: "bad" }]}>
+          <div>
+            <div className={`display text-[2.15rem] tabular-nums ${worst === "mute" ? "text-ink" : INK[worst]}`}>
+              {contained}<span className="text-[1.3rem] text-ink-3">/{runnable}</span>
+            </div>
+            <div className="smcp -mt-0.5 text-[0.74rem] text-ink-2">contained</div>
+          </div>
+        </Donut>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Attack verdicts">
+            {list.map(a => {
+              const c = tileOf(a, lab.runs[a.name]);
+              return (
+                <button key={a.name} onClick={() => onPick(a.name)} title={`${a.title}: ${c.label}`} aria-label={`${a.title}: ${c.label}`}
+                  className={`grid h-8 w-8 place-items-center rounded-[6px] border text-[0.9rem] font-bold transition hover:-translate-y-px ${c.cls} ${a.name === sel ? "ring-2 ring-accent ring-offset-2 ring-offset-sheet" : ""}`}>
+                  {c.mark}
+                </button>
+              );
+            })}
+          </div>
+          <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-0.5 text-[0.92rem] text-ink-2">
+            {notRun > 0 && <span>{notRun} not run yet</span>}
+            {(tally.breached ?? 0) > 0 && <span className="font-bold text-bad">{tally.breached} breached</span>}
+            {(tally.inconclusive ?? 0) > 0 && <span className="text-warn">{tally.inconclusive} inconclusive</span>}
+            {(tally.error ?? 0) > 0 && <span className="text-bad">{tally.error} could not run</span>}
+            {list.length > runnable && <span className="italic text-ink-3">{list.length - runnable} need the egress proxy or the browser image</span>}
+            {notRun === 0 && !tally.breached && !tally.inconclusive && !tally.error && contained > 0 && <span className="font-bold text-ok">All runnable attacks contained</span>}
+          </div>
+        </div>
+        <p className="hidden max-w-sm text-[0.86rem] italic leading-snug text-ink-2 xl:block">
+          Each attack is a scripted attacker driving the real agent loop, policy engine and Docker sandbox. No model is involved.
+          The same definitions run in CI as <code className="rounded-[3px] bg-sunken px-1 font-mono text-[0.9em] not-italic text-ink">pytest -m attacks</code>.
+        </p>
+        <Btn variant="primary" onClick={lab.runAll} disabled={lab.running || runnable === 0} className="shrink-0 !px-5 !py-2.5 text-[1.05rem]">
+          {lab.all ? <><Spin /> Running all</> : <>Run all attacks <span aria-hidden>▸</span></>}
+        </Btn>
       </div>
-      <div className="text-xs text-zinc-400">
-        {notRun > 0 && <div>{notRun} not run yet</div>}
-        {(tally.breached ?? 0) > 0 && <div className="text-red-400">{tally.breached} breached</div>}
-        {(tally.inconclusive ?? 0) > 0 && <div className="text-amber-400">{tally.inconclusive} inconclusive</div>}
-        {(tally.error ?? 0) > 0 && <div className="text-red-400">{tally.error} could not run</div>}
-        {list.length > runnable && <div className="text-zinc-500">{list.length - runnable} need the egress proxy or the browser image</div>}
-      </div>
-      <p className="max-w-sm text-xs text-zinc-500">
-        Each attack is a scripted attacker driving the real agent loop, policy engine and Docker sandbox. No model is involved.
-        The same definitions run in CI as <code className="text-zinc-400">pytest -m attacks</code>.
-      </p>
-      <button onClick={lab.runAll} disabled={lab.running || runnable === 0}
-        className={`ml-auto rounded bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white disabled:opacity-40 ${FOCUS}`}>
-        {lab.all ? "Running all…" : "Run all"}
-      </button>
     </div>
   );
 }
 
-function Card({ a, run, selected, disabled, onSelect, onRun }: {
+function AttackCard({ a, run, selected, disabled, onSelect, onRun }: {
   a: AttackInfo; run: Run | undefined; selected: boolean; disabled: boolean; onSelect: () => void; onRun: () => void;
 }) {
   const v = verdictOf(run);
   const style = v ? VERDICT[v] : null;
+  const running = run?.state === "running";
+  const status = running ? "running" : style ? style.label : a.available ? "not run" : a.needs_browser && !a.needs_egress ? "needs browser image" : "needs egress";
+  const tile = tileOf(a, run);
   return (
-    <li className={`flex items-stretch rounded border ${selected ? "border-emerald-700 bg-zinc-900" : "border-zinc-800 hover:border-zinc-700"}`}>
-      <button onClick={onSelect} aria-pressed={selected} className={`min-w-0 flex-1 rounded-l p-3 text-left ${FOCUS}`}>
-        <div className="flex items-baseline gap-2">
-          <span aria-hidden className={`w-4 text-center font-semibold ${style?.text ?? "text-zinc-700"}`}>{run?.state === "running" ? "…" : style?.mark ?? "·"}</span>
-          <span className="font-medium text-zinc-100">{a.title}</span>
-          <span className={`ml-auto text-xs ${style?.text ?? "text-zinc-600"}`}>
-            {run?.state === "running" ? "running" : style ? style.label : a.available ? "not run" : a.needs_browser && !a.needs_egress ? "needs browser image" : "needs egress"}
+    <li className={`group relative rounded-[7px] border transition ${selected ? "border-accent/80 bg-raised shadow-[0_0_0_1px_var(--accent),0_14px_30px_-18px_var(--accent)]" : "border-rule bg-sheet hover:border-rule-2 hover:bg-raised"}`}>
+      <button onClick={onSelect} aria-pressed={selected} className="block w-full rounded-[7px] p-3.5 pb-12 text-left">
+        <div className="flex items-start gap-3">
+          <span aria-hidden className={`mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-[6px] border text-[0.9rem] font-bold ${tile.cls}`}>
+            {running ? <Spin className="h-3 w-3" /> : tile.mark}
           </span>
+          <div className="min-w-0 flex-1">
+            <div className="text-[1.04rem] font-bold leading-tight text-ink">{a.title}</div>
+            <p className="mt-1 line-clamp-2 text-[0.88rem] leading-snug text-ink-2">{a.summary}</p>
+          </div>
         </div>
-        <p className="mt-1 line-clamp-2 pl-6 text-xs text-zinc-500">{a.summary}</p>
-        <p className="mt-1 pl-6 text-xs text-zinc-600">{a.category} · {a.profile}</p>
       </button>
-      <button onClick={onRun} disabled={disabled || !a.available || run?.state === "running"}
-        title={a.available ? undefined : a.needs_browser && !a.needs_egress
-          ? "Needs the browser image: docker build -f images/browser/Dockerfile -t minilocker-browser:latest ."
-          : "Needs the egress proxy, which is not attached"}
-        aria-label={`Run ${a.title}`}
-        className={`m-2 self-center rounded border border-zinc-700 px-3 py-1 text-xs text-zinc-200 hover:border-emerald-600 disabled:opacity-40 ${FOCUS}`}>
-        {run?.state === "running" ? "Running…" : v ? "Run again" : "Run"}
-      </button>
+      <div className="absolute inset-x-3.5 bottom-3 flex items-center gap-2">
+        <Chip>{a.category}</Chip>
+        <span className={`smcp text-[0.82rem] ${style ? INK[style.tone] : "text-ink-3"}`}>{status}</span>
+        <Btn size="sm" onClick={onRun} disabled={disabled || !a.available || running} className="ml-auto"
+          title={a.available ? undefined : a.needs_browser && !a.needs_egress
+            ? "Needs the browser image: docker build -f images/browser/Dockerfile -t minilocker-browser:latest ."
+            : "Needs the egress proxy, which is not attached"}
+          aria-label={`Run ${a.title}`}>
+          {running ? "Running…" : v ? "Run again" : "Run"}
+        </Btn>
+      </div>
     </li>
   );
 }
@@ -91,32 +131,32 @@ function Card({ a, run, selected, disabled, onSelect, onRun }: {
 function PolicyChip({ s }: { s: AttackStep }) {
   if (!s.policy) return null;
   const { action, risk } = s.policy;
-  const [text, cls] = action === "deny" ? [`policy denied · ${risk} risk`, "border-red-800 text-red-400"]
-    : action === "require_approval" ? [`policy asked for approval (${s.approval ?? "no answer"}) · ${risk} risk`, "border-amber-800 text-amber-400"]
-    : action === "allow_in_sandbox" ? [`policy let it run in the sandbox · ${risk} risk`, "border-amber-800 text-amber-400"]
-    : [`policy allowed · ${risk} risk`, "border-zinc-700 text-zinc-400"];
-  return <span className={`rounded border px-1.5 py-0.5 text-[11px] ${cls}`}>{text}</span>;
+  const [text, tone]: [string, Tint] = action === "deny" ? [`policy denied · ${risk} risk`, "bad"]
+    : action === "require_approval" ? [`policy asked for approval (${s.approval ?? "no answer"}) · ${risk} risk`, "warn"]
+    : action === "allow_in_sandbox" ? [`let run in the sandbox · ${risk} risk`, "warn"]
+    : [`policy allowed · ${risk} risk`, "mute"];
+  return <Chip tone={tone} className="shrink-0 !normal-case !tracking-normal">{text}</Chip>;
 }
 
 function Attempt({ s }: { s: AttackStep }) {
   return (
-    <li className="space-y-1 text-xs">
-      <div className="flex items-start gap-2">
-        <span className="shrink-0 text-zinc-600">{s.tool === "write_file" ? "write" : "$"}</span>
-        <code className="min-w-0 flex-1 break-all text-zinc-200">{s.text}</code>
+    <li className="panel space-y-1.5 p-3.5 text-[0.9rem]">
+      <div className="flex items-start gap-2.5">
+        <span className={`smcp w-9 shrink-0 pt-px ${s.tool === "write_file" ? "text-ink-3" : "font-bold text-ok"}`}>{s.tool === "write_file" ? "write" : "$"}</span>
+        <code className="min-w-0 flex-1 break-all font-mono text-[0.84rem] text-ink">{s.text}</code>
         <PolicyChip s={s} />
       </div>
-      {s.content && <details className="pl-5 text-zinc-500"><summary className="cursor-pointer">file contents</summary>
-        <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-zinc-900 p-2 text-zinc-400">{s.content}</pre></details>}
+      {s.content && <details className="pl-[2.9rem] text-ink-2"><summary className="italic">file contents</summary>
+        <pre className={`${LISTING} mt-1 max-h-48 overflow-auto whitespace-pre-wrap p-2.5 text-ink-2`}>{s.content}</pre></details>}
       {s.egress.map((e, i) => (
-        <div key={i} className={`pl-5 ${e.decision === "blocked" ? "text-red-400" : "text-emerald-400"}`}>
-          egress {e.decision} → {e.host}{e.reason ? ` (${e.reason})` : ""}
+        <div key={i} className={`pl-[2.9rem] ${e.decision === "blocked" ? "text-bad" : "text-ok"}`}>
+          <span aria-hidden>↗ </span>egress {e.decision} → <span className="font-mono text-[0.85em]">{e.host}</span>{e.reason ? ` (${e.reason})` : ""}
         </div>))}
-      {s.recreated && <div className="pl-5 text-amber-400">sandbox killed and replaced</div>}
+      {s.recreated && <div className="pl-[2.9rem] text-warn">↻ sandbox killed and replaced</div>}
       {s.result !== null && (
-        <details className="pl-5 text-zinc-500" open={s.policy?.action === "deny"}>
-          <summary className="cursor-pointer">{s.policy?.action === "deny" ? "blocked before it ran" : "sandbox output"}</summary>
-          <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-zinc-900 p-2 text-zinc-400">{s.result}</pre>
+        <details className="pl-[2.9rem] text-ink-2" open={s.policy?.action === "deny"}>
+          <summary className="italic">{s.policy?.action === "deny" ? "blocked before it ran" : "sandbox output"}</summary>
+          <pre className={`${LISTING} mt-1 max-h-48 overflow-auto whitespace-pre-wrap p-2.5 text-ink-2`}>{s.result}</pre>
         </details>)}
     </li>
   );
@@ -125,69 +165,82 @@ function Attempt({ s }: { s: AttackStep }) {
 function Checks({ checks }: { checks: AttackCheck[] }) {
   const always = checks.filter(c => c.scope === "always");
   const row = (c: AttackCheck) => (
-    <li key={c.label} className="flex gap-2 text-xs">
-      <span aria-label={CHECK[c.status].word} className={`w-4 shrink-0 text-center font-semibold ${CHECK[c.status].text}`}>{CHECK[c.status].mark}</span>
-      <div><div className="text-zinc-200">{c.label}</div><div className="text-zinc-500">{c.detail}</div></div>
+    <li key={c.label} className="flex gap-3">
+      <span aria-label={CHECK[c.status].word} className={`mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full border text-[0.75rem] font-bold ${EDGE[CHECK[c.status].tone]} ${INK[CHECK[c.status].tone]} ${WASH[CHECK[c.status].tone]}`}>{CHECK[c.status].mark}</span>
+      <div className="min-w-0"><div className="font-medium text-ink">{c.label}</div><div className="text-[0.88rem] leading-snug text-ink-2">{c.detail}</div></div>
     </li>);
-  return (<>
-    <ul className="space-y-2">{checks.filter(c => c.scope === "attack").map(row)}</ul>
+  return (<Card className="p-4">
+    <ul className="space-y-3">{checks.filter(c => c.scope === "attack").map(row)}</ul>
     {always.length > 0 && (<>
-      <h4 className="mt-4 text-xs text-zinc-500">Checked on every attack</h4>
-      <ul className="mt-2 space-y-2">{always.map(row)}</ul>
+      <h4 className="smcp mt-5 border-t border-rule pt-2.5 text-[0.88rem] text-ink-3">Checked on every attack</h4>
+      <ul className="mt-3 space-y-3">{always.map(row)}</ul>
     </>)}
-  </>);
+  </Card>);
 }
 
 function Result({ a, r, onOpenReport }: { a: AttackInfo; r: AttackResult; onOpenReport: (id: string) => void }) {
   const v = VERDICT[r.verdict];
   return (
-    <div className="space-y-5">
-      <div className={`rounded border p-3 ${v.box}`} role="status">
-        <div className="flex items-center gap-3">
-          <span className={`text-lg font-semibold ${v.text}`}>{v.mark} {v.label}</span>
-          <span className="text-xs text-zinc-500">{r.duration_s}s · {r.counts.pass} passed
-            {r.counts.fail > 0 && ` · ${r.counts.fail} failed`}{r.counts.unproven > 0 && ` · ${r.counts.unproven} not proven`}</span>
+    <div className="space-y-7">
+      <div className={`rise relative overflow-hidden rounded-[8px] border p-5 ${EDGE[v.tone]} ${WASH[v.tone]}`} role="status">
+        <span aria-hidden className="pointer-events-none absolute -right-10 -top-10 h-44 w-44 rounded-full border border-current opacity-[.12]" style={{ color: `var(--${v.tone === "mute" ? "ink-3" : v.tone})` }} />
+        <span aria-hidden className="pointer-events-none absolute -right-2 -top-2 h-24 w-24 rounded-full border border-current opacity-[.14]" style={{ color: `var(--${v.tone === "mute" ? "ink-3" : v.tone})` }} />
+        <div className="relative flex items-center gap-5">
+          <span aria-hidden className={`grid h-16 w-16 shrink-0 place-items-center rounded-full border-2 text-[2rem] font-bold ${EDGE[v.tone]} ${INK[v.tone]}`}
+            style={{ boxShadow: v.tone === "mute" ? undefined : `0 0 28px -4px var(--${v.tone})` }}>{v.mark}</span>
+          <div className="min-w-0">
+            <Label className="block">Verdict</Label>
+            <div className={`display text-[2.4rem] ${INK[v.tone]}`}>{v.label}</div>
+            <div className="mt-1 flex flex-wrap gap-x-4 text-[0.9rem] text-ink-2">
+              <span className="tabular-nums">{r.duration_s}s</span>
+              <span><b className="text-ok">{r.counts.pass}</b> passed</span>
+              {r.counts.fail > 0 && <span><b className="text-bad">{r.counts.fail}</b> failed</span>}
+              {r.counts.unproven > 0 && <span><b className="text-warn">{r.counts.unproven}</b> not proven</span>}
+            </div>
+          </div>
           {r.task_id && r.verdict !== "unavailable" && (
-            <button onClick={() => onOpenReport(r.task_id!)}
-              className={`ml-auto rounded border border-zinc-700 px-3 py-1 text-xs text-zinc-200 hover:border-zinc-500 ${FOCUS}`}>
-              Open Blast Radius report
-            </button>)}
+            <Btn onClick={() => onOpenReport(r.task_id!)} className="ml-auto shrink-0">Open Blast Radius report <span aria-hidden>→</span></Btn>
+          )}
         </div>
-        {(VERDICT_HELP[r.verdict] || r.error) && <p className="mt-2 text-xs text-zinc-400">{r.error ?? VERDICT_HELP[r.verdict]}</p>}
+        {(VERDICT_HELP[r.verdict] || r.error) && <p className="relative mt-3.5 border-t border-ink/10 pt-2.5 text-[0.93rem] leading-snug text-ink-2">{r.error ?? VERDICT_HELP[r.verdict]}</p>}
       </div>
       {r.steps.length > 0 && (<section>
-        <h3 className="mb-2 text-sm font-medium text-zinc-300">What happened</h3>
-        <ol className="space-y-3">{r.steps.map(s => <Attempt key={s.index} s={s} />)}</ol>
+        <SectionHead no={1} title="What happened" className="mb-3" />
+        <ol className="space-y-2.5">{r.steps.map(s => <Attempt key={s.index} s={s} />)}</ol>
       </section>)}
       {r.checks.length > 0 && (<section>
-        <h3 className="mb-2 text-sm font-medium text-zinc-300">Containment checks</h3>
+        <SectionHead no={2} title="Containment checks" className="mb-3" />
         <Checks checks={r.checks} />
       </section>)}
-      <p className="text-xs text-zinc-600">Expected: {a.expected}</p>
+      <p className="border-t border-rule pt-2.5 text-[0.88rem] italic text-ink-3"><b className="not-italic text-ink-2">Expected.</b> {a.expected}</p>
     </div>
   );
 }
 
 function Preview({ a }: { a: AttackInfo }) {
   return (
-    <div className="space-y-5">
+    <div className="space-y-7">
       <section>
-        <h3 className="mb-2 text-sm font-medium text-zinc-300">What the attacker tries</h3>
-        <ol className="space-y-2">
+        <SectionHead no={1} title="What the attacker tries" className="mb-3" />
+        <ol className="space-y-2.5">
           {a.tries.map((t, i) => (
-            <li key={i} className="text-xs">
-              <div className="flex gap-2"><span className="shrink-0 text-zinc-600">{t.tool === "write_file" ? "write" : t.tool === "control" ? "↺" : "$"}</span>
-                <code className="break-all text-zinc-200">{t.text}</code></div>
-              {t.content && <details className="pl-5 text-zinc-500"><summary className="cursor-pointer">file contents</summary>
-                <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-zinc-900 p-2 text-zinc-400">{t.content}</pre></details>}
+            <li key={i} className="panel p-3.5 text-[0.9rem]">
+              <div className="flex gap-2.5"><span className={`smcp w-9 shrink-0 pt-px ${t.tool === "write_file" || t.tool === "control" ? "text-ink-3" : "font-bold text-ok"}`}>{t.tool === "write_file" ? "write" : t.tool === "control" ? "↺" : "$"}</span>
+                <code className="min-w-0 break-all font-mono text-[0.84rem] text-ink">{t.text}</code></div>
+              {t.content && <details className="mt-1.5 pl-[2.9rem] text-ink-2"><summary className="italic">file contents</summary>
+                <pre className={`${LISTING} mt-1 max-h-48 overflow-auto whitespace-pre-wrap p-2.5 text-ink-2`}>{t.content}</pre></details>}
             </li>))}
         </ol>
       </section>
       <section>
-        <h3 className="mb-2 text-sm font-medium text-zinc-300">What will be checked</h3>
-        <ul className="list-disc space-y-1 pl-5 text-xs text-zinc-400">{a.checks.map(c => <li key={c}>{c}</li>)}</ul>
+        <SectionHead no={2} title="What will be checked" className="mb-3" />
+        <Card className="p-4">
+          <ul className="space-y-2 text-ink-2">
+            {a.checks.map(c => <li key={c} className="flex gap-3"><span aria-hidden className="mt-[0.5rem] h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />{c}</li>)}
+          </ul>
+        </Card>
       </section>
-      <p className="text-xs text-zinc-600">Expected: {a.expected}</p>
+      <p className="border-t border-rule pt-2.5 text-[0.88rem] italic text-ink-3"><b className="not-italic text-ink-2">Expected.</b> {a.expected}</p>
     </div>
   );
 }
@@ -203,31 +256,32 @@ export function AttackLab({ lab, onOpenReport }: { lab: AttackLabApi; onOpenRepo
   }, [runs]);
 
   if (loadError) return (
-    <div className="flex flex-1 items-center justify-center"><div className="max-w-md space-y-3 rounded border border-dashed border-zinc-700 p-6 text-center">
-      <p className="text-sm text-red-400">{loadError}</p>
-      <p className="text-xs text-zinc-500">If the control plane uses an API token, enter it in the header, then retry.</p>
-      <button onClick={load} className={`rounded border border-zinc-700 px-3 py-1 text-xs ${FOCUS}`}>Retry</button>
+    <div className="flex flex-1 items-center justify-center p-8"><div className="rise panel max-w-md space-y-3 border-bad/50 p-6 text-center">
+      <p className="font-bold text-bad">{loadError}</p>
+      <p className="text-[0.92rem] italic text-ink-2">If the control plane uses an API token, enter it in the header (top right), then retry.</p>
+      <Btn onClick={load}>Retry</Btn>
     </div></div>);
-  if (!attacks) return <div className="flex flex-1 items-center justify-center text-zinc-500">Loading attacks…</div>;
+  if (!attacks) return <div className="flex flex-1 items-center justify-center gap-2 italic text-ink-3"><Spin /> Loading attacks…</div>;
 
   const cur = attacks.find(a => a.name === (sel ?? attacks[0].name))!;
   const run = runs[cur.name];
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <Summary lab={lab} />
-      <div className="grid min-h-0 flex-1 grid-cols-[400px_minmax(0,1fr)]">
-        <ul className="min-h-0 space-y-2 overflow-y-auto border-r border-zinc-800 p-3">
-          {attacks.map(a => <Card key={a.name} a={a} run={runs[a.name]} selected={a.name === cur.name} disabled={lab.running}
+      <Summary lab={lab} sel={cur.name} onPick={setSel} />
+      <div className="grid min-h-0 flex-1 grid-cols-[27rem_minmax(0,1fr)]">
+        <ul className="min-h-0 space-y-2.5 overflow-y-auto border-r border-rule bg-paper/40 p-3.5">
+          {attacks.map(a => <AttackCard key={a.name} a={a} run={runs[a.name]} selected={a.name === cur.name} disabled={lab.running}
             onSelect={() => setSel(a.name)} onRun={() => { setSel(a.name); lab.run(a.name); }} />)}
         </ul>
-        <section className="min-h-0 overflow-y-auto p-5">
-          <div className="mx-auto max-w-3xl space-y-5">
+        <section className="min-h-0 overflow-y-auto px-8 py-7">
+          <div className="mx-auto max-w-3xl space-y-7">
             <header>
-              <h2 className="text-lg font-semibold text-zinc-100">{cur.title}</h2>
-              <p className="mt-1 text-sm text-zinc-400">{cur.summary}</p>
+              <div className="flex items-center gap-2"><Chip tone="info">{cur.category}</Chip><Chip>{cur.profile} profile</Chip></div>
+              <h2 className="display mt-2.5 text-[2.7rem] text-ink">{cur.title}</h2>
+              <p className="mt-2.5 border-l-2 border-accent/70 pl-4 text-[1.06rem] italic leading-relaxed text-ink-2">{cur.summary}</p>
             </header>
-            {run?.state === "running" && <p role="status" className="text-sm text-amber-400">Running in a real sandbox. Some attacks take up to 30 seconds…</p>}
-            {run?.state === "failed" && <p role="status" className="rounded border border-red-800 p-3 text-sm text-red-400">{run.message}</p>}
+            {run?.state === "running" && <p role="status" className="flex items-center gap-2.5 rounded-[6px] border border-info/50 bg-info-wash px-3.5 py-2.5 text-info"><Spin /> Running in a real sandbox. Some attacks take up to 30 seconds…</p>}
+            {run?.state === "failed" && <p role="status" className="rounded-[6px] border border-bad/50 bg-bad-wash p-3.5 text-bad">{run.message}</p>}
             {run?.state === "done" ? <Result a={cur} r={run.result} onOpenReport={onOpenReport} /> : <Preview a={cur} />}
           </div>
         </section>

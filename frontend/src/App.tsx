@@ -12,140 +12,239 @@ import { TerminalView } from "./Terminal";
 import { useAttacks } from "./useAttacks";
 import { useTask } from "./useTask";
 import type { TaskApi } from "./useTask";
+import { Chip, Mark, Pulse } from "./ui";
+import type { Tint } from "./ui";
 
-type Screen = "workspace" | "timeline" | "attacks" | "report" | "sessions" | "infra";
+type Screen =
+  | "workspace"
+  | "timeline"
+  | "attacks"
+  | "report"
+  | "sessions"
+  | "infra";
 type Tab = "terminal" | "browser" | "files";
+type Theme = "light" | "dark";
 
-const SCREENS: { id: Screen; label: string; short: string; description: string }[] = [
-  { id: "workspace", label: "Workspace", short: "01", description: "Run and inspect" },
-  { id: "timeline", label: "Timeline", short: "02", description: "Trace every change" },
-  { id: "attacks", label: "Attack lab", short: "03", description: "Test the boundary" },
-  { id: "report", label: "Reports", short: "04", description: "Review the evidence" },
-  { id: "sessions", label: "Sessions", short: "05", description: "Previous runs" },
-  { id: "infra", label: "Infrastructure", short: "06", description: "System health" },
-];
-
-const PATHS: Record<string, string> = {
-  workspace: "M3 4.5h18v15H3z M3 9h18 M7 13l2 2-2 2 M12 17h4",
-  timeline: "M4 4v16 M4 7h9 M13 7v5 M13 12h7 M4 18h7 M11 18v-4",
-  attacks: "M12 2 4 5v6c0 5 3.3 8.4 8 11 4.7-2.6 8-6 8-11V5z M9 12l2 2 4-4",
-  report: "M6 3h9l4 4v14H6z M15 3v4h4 M9 12h7 M9 16h7",
-  sessions: "M4 5h16v4H4z M6 9v11h12V9 M10 13h4",
-  infra: "M6 4h12v5H6z M6 15h12v5H6z M9 9v6 M15 9v6 M9 6.5h.01 M9 17.5h.01",
-  terminal: "M4 5h16v14H4z M7 10l3 2.5L7 15 M12 15h5",
-  browser: "M3 5h18v14H3z M3 9h18 M6.5 7h.01 M9 7h.01",
-  files: "M6 3h8l4 4v14H6z M14 3v5h4 M9 13h6 M9 17h6",
-  lock: "M6 11h12v10H6z M9 11V8a3 3 0 016 0v3 M12 15v2",
-  arrow: "M5 12h14 M13 6l6 6-6 6",
-};
-
-function Icon({ name, size = 18 }: { name: string; size?: number }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
-    strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={PATHS[name] ?? PATHS.workspace} /></svg>;
-}
-
-const TABS: { id: Tab; label: string }[] = [
-  { id: "terminal", label: "Terminal" },
-  { id: "browser", label: "Browser" },
-  { id: "files", label: "Artifacts" },
+const SCREENS: { id: Screen; label: string }[] = [
+  { id: "workspace", label: "Workspace" },
+  { id: "timeline", label: "Timeline" },
+  { id: "attacks", label: "Attack Lab" },
+  { id: "report", label: "Report" },
+  { id: "sessions", label: "Sessions" },
+  { id: "infra", label: "Infra" },
 ];
 
 function Workspace({ t }: { t: TaskApi }) {
   const [tab, setTab] = useState<Tab>("terminal");
-  const status = t.running ? "running" : t.end?.status ?? (t.taskId ? "finished" : "idle");
-  return <div className="ml-screen ml-workspace-screen">
-    <div className="ml-screen-intro">
-      <div className="ml-intro-left">
-        <div className="ml-eyebrow"><span className="ml-eyebrow-line" />THE EXECUTION CONSOLE <span className="ml-eyebrow-divider">/</span> 001</div>
-        <h1>Build freely. <em>Run safely.</em></h1>
-        <p>An isolated workspace for agents, with every action observable and every boundary accounted for.</p>
-      </div>
-      <div className="ml-intro-right" aria-label="Current task status">
-        <span className={`ml-run-indicator ml-run-${status}`}><i />{t.running ? "EXECUTION IN PROGRESS" : t.taskId ? `LAST RUN · ${status.toUpperCase()}` : "READY FOR A NEW SESSION"}</span>
-        <span className="ml-id">{t.taskId ? `RUN / ${t.taskId}` : "CONTROL PLANE / STANDBY"}</span>
-      </div>
-    </div>
-    <div className="ml-workspace">
-      <section className="ml-task-pane" aria-label="Task composer and event steps">
+  const hidden = (x: Tab) => (tab === x ? "" : "hidden");
+  return (
+    <div className="grid min-h-0 flex-1 grid-cols-[22rem_minmax(0,1fr)_27rem]">
+      <section className="flex min-h-0 flex-col border-r border-rule bg-paper/40">
         <TaskForm running={t.running} error={t.error} onRun={t.start} />
-        <div className="ml-pane-label"><span>ACTIVITY TRACE</span><span className="ml-pane-count">{t.events.filter(e => e.type === "tool.call").length} ACTIONS</span></div>
         <StepStream events={t.events} />
       </section>
-      <section className="ml-console-pane" aria-label="Live execution output">
-        <div className="ml-console-tabs">
-          <div className="ml-tab-buttons" role="tablist" aria-label="Workspace views">
-            {TABS.map(x => <button key={x.id} role="tab" aria-selected={tab === x.id}
-              className={`ml-console-tab ${tab === x.id ? "is-active" : ""}`} onClick={() => setTab(x.id)}>
-              <Icon name={x.id} size={16} />{x.label}</button>)}
+      <section className="flex min-h-0 flex-col">
+        <div role="tablist" className="flex shrink-0 items-center gap-1 px-4 pt-3">
+          {(["terminal", "browser", "files"] as Tab[]).map((x) => (
+            <button
+              key={x}
+              role="tab"
+              aria-selected={tab === x}
+              onClick={() => setTab(x)}
+              className={`smcp rounded-full border px-4 py-1 text-[0.95rem] transition ${
+                tab === x
+                  ? "border-accent/70 bg-accent/12 text-ink shadow-[0_0_18px_-6px_var(--accent)]"
+                  : "border-transparent text-ink-3 hover:text-ink"
+              }`}
+            >
+              {x}
+            </button>
+          ))}
+        </div>
+        <div className="min-h-0 flex-1 p-3">
+          <div className="panel relative h-full overflow-hidden !bg-sheet">
+            <div className={`h-full ${hidden("terminal")}`}>
+              <TerminalView events={t.events} />
+            </div>
+            {tab === "browser" && (
+              <BrowserView
+                taskId={t.taskId}
+                events={t.events}
+                running={t.running}
+              />
+            )}
+            {tab === "files" && (
+              <FilesView
+                taskId={t.taskId}
+                events={t.events}
+                running={t.running}
+              />
+            )}
           </div>
-          <span className="ml-console-caption"><span className={t.running ? "ml-live-dot on" : "ml-live-dot"} />{t.running ? "STREAMING" : "OUTPUT"}</span>
         </div>
-        <div className="ml-console-inner">
-          <div className={`ml-terminal-frame ${tab === "terminal" ? "" : "hidden"}`}><TerminalView events={t.events} /></div>
-          {tab === "browser" && <BrowserView taskId={t.taskId} events={t.events} running={t.running} />}
-          {tab === "files" && <FilesView taskId={t.taskId} events={t.events} running={t.running} />}
-        </div>
-        <div className="ml-console-foot"><span>ISOLATED RUNTIME</span><span>{t.events.length} LEDGER EVENTS</span><span>READ-ONLY OUTPUT</span></div>
       </section>
-      <aside className="ml-impact-pane" aria-label="Security observability panel">
-        <div className="ml-impact-header"><div><span className="ml-kicker">OBSERVABILITY / 02</span><h2>Boundary monitor</h2></div><span className="ml-crosshair">✳</span></div>
+      <section className="min-h-0 border-l border-rule bg-paper/40">
         <BlastPanel events={t.events} report={t.report} running={t.running} />
-      </aside>
+      </section>
     </div>
-  </div>;
+  );
 }
+
+function statusTone(status: string): Tint {
+  if (status === "idle") return "mute";
+  if (status === "running") return "info";
+  if (status.startsWith("error")) return "bad";
+  if (status.startsWith("halted")) return "warn";
+  return "ok";
+}
+
+const Sun = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden>
+    <circle cx="12" cy="12" r="4" /><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8" />
+  </svg>
+);
+const Moon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M20.5 14.2A8.5 8.5 0 1 1 9.8 3.5a6.7 6.7 0 0 0 10.7 10.7Z" />
+  </svg>
+);
+const Key = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <circle cx="8" cy="15" r="4" /><path d="M10.8 12.2 20 3M16 7l3 3M14 9l2 2" />
+  </svg>
+);
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>("workspace");
   const [token, setTok] = useState(getToken());
-  const [mobileMenu, setMobileMenu] = useState(false);
+  // The token is applied (screens refetch) when the field loses focus or Enter is pressed, not on every keystroke.
+  const [applied, setApplied] = useState(getToken());
+  const [theme, setTheme] = useState<Theme>(() => (document.documentElement.dataset.theme === "light" ? "light" : "dark"));
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    try { localStorage.setItem("minilocker.theme", theme); } catch { /* private mode */ }
+  }, [theme]);
   const t = useTask();
   const lab = useAttacks();
+  // An attack's report overrides the workspace task until the workspace starts a new one.
   const [reportOverride, setReportOverride] = useState<string | null>(null);
   useEffect(() => setReportOverride(null), [t.taskId]);
   const reportId = reportOverride ?? t.taskId;
-  const active = SCREENS.find(s => s.id === screen)!;
-  return <div className="ml-shell">
-    <aside className={`ml-sidebar ${mobileMenu ? "ml-menu-open" : ""}`}>
-      <button className="ml-brand" onClick={() => { setScreen("workspace"); setMobileMenu(false); }} aria-label="Open MiniLocker workspace">
-        <div className="ml-brand-mark"><Icon name="lock" size={22} /></div>
-        <div className="ml-brand-type"><strong>mini<span>locker</span></strong><small>THE SAFE AGENT WORKSPACE</small></div>
-      </button>
-      <div className="ml-nav-group-label">WORKSPACE <span>↗</span></div>
-      <nav className="ml-nav" aria-label="Primary navigation">
-        {SCREENS.map(s => <button key={s.id} onClick={() => { setScreen(s.id); setMobileMenu(false); }}
-          className={`ml-nav-item ${screen === s.id ? "is-active" : ""}`} aria-current={screen === s.id ? "page" : undefined}>
-          <Icon name={s.id} size={18} /><span>{s.label}</span><small>{s.short}</small>
-        </button>)}
-      </nav>
-      <div className="ml-sidebar-bottom">
-        <div className="ml-trust-note"><div className="ml-trust-mark"><Icon name="lock" size={17} /></div><div><strong>Designed for control.</strong><span>Actions are tracked. Boundaries stay visible.</span></div></div>
-        <div className="ml-sidebar-meta"><span>MINILOCKER</span><span>CONSOLE v01</span></div>
-      </div>
-    </aside>
-    <main className="ml-main">
-      <header className="ml-topbar">
-        <div className="ml-topbar-path"><button className="ml-mobile-nav" onClick={() => setMobileMenu(v => !v)} aria-expanded={mobileMenu} aria-label="Toggle navigation">☰</button><span>PLATFORM</span><span className="ml-slash">/</span><strong>{active.label}</strong></div>
-        <div className="ml-topbar-actions">
-          <span className={`ml-topbar-state ${t.running ? "is-running" : ""}`}><i />{t.running ? "AGENT ACTIVE" : "AGENT IDLE"}</span>
-          <details className="ml-auth-details"><summary><Icon name="lock" size={14} /> API ACCESS <span>⌄</span></summary>
-            <div className="ml-auth-popover"><label htmlFor="ml-api-token">CONTROL PLANE TOKEN</label><p>Only required when API authentication is enabled.</p>
-              <input id="ml-api-token" type="password" value={token} placeholder="Enter API token" autoComplete="off"
-                onChange={e => { setTok(e.target.value); setToken(e.target.value); }} /></div>
-          </details>
+  const status = !t.taskId
+    ? "idle"
+    : t.running
+      ? "running"
+      : (t.end?.status ?? "done");
+  const apply = () => { const v = token.trim(); setToken(v); setTok(v); setApplied(v); };
+  return (
+    <div className="flex h-full flex-col text-ink">
+      <header className="relative z-10 shrink-0 border-b border-rule bg-paper/75 backdrop-blur-md">
+        <div className="flex items-stretch gap-5 px-5 xl:gap-8">
+          <div className="flex items-center gap-3 py-2.5 text-accent">
+            <span className="grid h-10 w-10 place-items-center rounded-full border border-rule-2 bg-sheet shadow-[0_0_22px_-6px_var(--accent)]">
+              <Mark size={30} />
+            </span>
+            <div className="leading-none">
+              <div className="display text-[1.55rem] text-ink">MiniLocker</div>
+              <div className="smcp mt-1 hidden text-[0.74rem] text-ink-3 xl:block">a blast-radius ledger for AI agents</div>
+            </div>
+          </div>
+          <nav className="flex items-stretch gap-0.5" aria-label="Screens">
+            {SCREENS.map((s, i) => (
+              <button
+                key={s.id}
+                onClick={() => setScreen(s.id)}
+                aria-current={screen === s.id ? "page" : undefined}
+                className={`relative flex items-center gap-1.5 whitespace-nowrap px-2.5 text-[1.04rem] transition xl:px-3.5 ${
+                  screen === s.id ? "font-bold text-ink" : "text-ink-2 hover:text-ink"
+                }`}
+              >
+                <span className={`text-[0.78rem] italic ${screen === s.id ? "text-accent" : "text-ink-3"}`}>{i + 1}</span>
+                {s.label}
+                {screen === s.id && <span aria-hidden className="absolute inset-x-2 bottom-0 h-[3px] rounded-t-full bg-accent" style={{ boxShadow: "0 0 14px var(--accent)" }} />}
+              </button>
+            ))}
+          </nav>
+          <div className="ml-auto flex items-center gap-2.5 py-2">
+            <Chip tone={statusTone(status)} title="Current task" dot={status !== "running"}>
+              {status === "running" && <Pulse tone="info" />}
+              {t.taskId && <span className="font-mono normal-case tracking-normal">{t.taskId}</span>}
+              {t.taskId && <span aria-hidden>·</span>}
+              {status}
+            </Chip>
+            <button
+              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+              aria-label={theme === "dark" ? "Switch to the paper theme" : "Switch to the midnight theme"}
+              title={theme === "dark" ? "Paper" : "Midnight"}
+              className="grid h-8 w-8 place-items-center rounded-[5px] border border-rule bg-sheet text-ink-2 transition hover:border-accent hover:text-ink"
+            >
+              {theme === "dark" ? <Sun /> : <Moon />}
+            </button>
+            <label
+              title="Only needed if MINILOCKER_API_TOKEN is set"
+              className="flex items-center gap-1.5 rounded-[5px] border border-rule bg-sheet px-2 py-1 text-ink-3 transition focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/20"
+            >
+              <Key />
+              <input
+                type="password"
+                value={token}
+                placeholder="API token"
+                aria-label="API token"
+                autoComplete="off"
+                onChange={(e) => {
+                  setTok(e.target.value);
+                  setToken(e.target.value);
+                }}
+                onBlur={() => { if (token.trim() !== applied) apply(); }}
+                onKeyDown={(e) => { if (e.key === "Enter") apply(); }}
+                className="w-20 bg-transparent text-[0.88rem] text-ink outline-none placeholder:text-ink-3 xl:w-24"
+              />
+              {applied && <span aria-hidden title="Token set" className="h-1.5 w-1.5 rounded-full bg-ok" />}
+            </label>
+          </div>
         </div>
+        <div className="hairline-accent" />
       </header>
-      {screen === "workspace" ? <Workspace t={t} /> : <div className="ml-screen ml-secondary-screen">
-        <div className="ml-secondary-intro"><div><div className="ml-eyebrow"><span className="ml-eyebrow-line" /> MINI LOCKER / {active.short}</div><h1>{active.label}<em>.</em></h1><p>{active.description} — evidence, not assumptions.</p></div><span className="ml-secondary-index">{active.short} / 06</span></div>
-        <div className="ml-secondary-content">
-          {screen === "attacks" ? <AttackLab lab={lab} onOpenReport={id => { setReportOverride(id); setScreen("report"); }} />
-            : screen === "report" ? <ReportScreen taskId={reportId} done={reportOverride !== null || (t.taskId !== null && !t.running)} />
-            : screen === "sessions" ? <SessionsScreen onOpen={id => { t.attach(id); setScreen("workspace"); }} onReport={id => { setReportOverride(id); setScreen("report"); }} />
-            : screen === "timeline" ? <TimelineView taskId={t.taskId} events={t.events} running={t.running} />
-            : <InfraView active={screen === "infra"} />}
-        </div>
-      </div>}
-    </main>
-    {t.approval && t.taskId && <ApprovalModal key={t.approval.payload.id} ev={t.approval} taskId={t.taskId} />}
-  </div>;
+      <main key={applied} className="flex min-h-0 flex-1 flex-col">
+        {screen === "workspace" ? (
+          <Workspace t={t} />
+        ) : screen === "attacks" ? (
+          <AttackLab
+            lab={lab}
+            onOpenReport={(id) => {
+              setReportOverride(id);
+              setScreen("report");
+            }}
+          />
+        ) : screen === "report" ? (
+          <ReportScreen
+            taskId={reportId}
+            done={reportOverride !== null || (t.taskId !== null && !t.running)}
+          />
+        ) : screen === "sessions" ? (
+          <SessionsScreen
+            onOpen={(id) => {
+              t.attach(id);
+              setScreen("workspace");
+            }}
+            onReport={(id) => {
+              setReportOverride(id);
+              setScreen("report");
+            }}
+          />
+        ) : screen === "timeline" ? (
+          <TimelineView taskId={t.taskId} events={t.events} running={t.running} />
+        ) : (
+          <InfraView active={screen === "infra"} />
+        )}
+      </main>
+      {t.approval && t.taskId && (
+        <ApprovalModal
+          key={t.approval.payload.id}
+          ev={t.approval}
+          taskId={t.taskId}
+        />
+      )}
+    </div>
+  );
 }

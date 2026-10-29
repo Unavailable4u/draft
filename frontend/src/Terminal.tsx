@@ -4,11 +4,22 @@ import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import type { LedgerEvent } from "./api";
 import { parseArgs } from "./derive";
+import { Mark } from "./ui";
 
-const R = "\x1b[38;2;239;151;143m", G = "\x1b[38;2;199;239;170m", Y = "\x1b[38;2;236;199;143m", D = "\x1b[38;2;113;141;117m", X = "\x1b[0m";
-// Untrusted sandbox output must never be able to inject terminal escape sequences.
-// Remove control bytes except newlines and tabs; only our renderer may emit ANSI codes.
+const R = "\x1b[31m", G = "\x1b[32m", Y = "\x1b[33m", D = "\x1b[2m", X = "\x1b[0m";
+// Sandbox output is untrusted: strip control bytes so it can't inject escape
+// sequences that fake our [policy]/[egress] lines. \n and \t survive.
 const clean = (s: string) => s.replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "");
+
+const FALLBACK_FONT = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+const CM_FONT = `"CMU Typewriter Text", ${FALLBACK_FONT}`;
+
+/** The terminal is always a dark "listing", in both themes, so output stays the focal point of the page. */
+const THEME = {
+  background: "#070a12", foreground: "#e9e4d6", cursor: "#a3b9ff", selectionBackground: "#2b3a6b",
+  black: "#070a12", red: "#ff8070", green: "#62d7a1", yellow: "#f4c55f", blue: "#8fb2f2", magenta: "#c9a0e8", cyan: "#84d0e8", white: "#e9e4d6",
+  brightBlack: "#8b90a3", brightRed: "#ffa296", brightGreen: "#8be6bb", brightYellow: "#f8d98d", brightBlue: "#aec7f6", brightMagenta: "#dbbcf0", brightCyan: "#a6dcee", brightWhite: "#fbf7ea",
+};
 
 function render(e: LedgerEvent): string {
   const p = e.payload;
@@ -17,20 +28,21 @@ function render(e: LedgerEvent): string {
       const a = parseArgs(p.args ?? "");
       if (p.tool === "run_shell") return `${G}$${X} ${clean(String(a?.cmd ?? p.args))}\n`;
       if (p.tool === "finish") return "";
-      if (p.tool === "browse") return `${D}# browse ${clean(String(a?.action ?? ""))} ${clean(String(a?.url ?? a?.selector ?? ""))}${X}\n`;
-      return `${D}# ${clean(String(p.tool))} ${clean(String(a?.path ?? ""))}${X}\n`;
+      if (p.tool === "browse")
+        return `${D}# browse ${clean(String(a?.action ?? ""))} ${clean(String(a?.url ?? a?.selector ?? ""))}${X}\n`;
+      return `${D}# ${p.tool} ${clean(String(a?.path ?? ""))}${X}\n`;
     }
     case "tool.result": {
       const m = clean(String(p.result ?? "")).match(/^exit_code=(-?\d+)\n?([\s\S]*)$/);
-      if (!m) return `${clean(String(p.result ?? ""))}\n`;
+      if (!m) return `${clean(String(p.result ?? ""))}\n`;   // e.g. a policy block message
       const body = m[2].replace(/\n+$/, "");
       return `${body ? body + "\n" : ""}${m[1] === "0" ? D : R}[exit ${m[1]}]${X}\n`;
     }
     case "policy.decision":
-      return p.action === "allow" ? "" : `${p.action === "deny" ? R : Y}[policy:${clean(String(p.action))}] ${clean((p.reasons ?? []).join("; "))}${X}\n`;
+      return p.action === "allow" ? "" : `${p.action === "deny" ? R : Y}[policy:${p.action}] ${clean((p.reasons ?? []).join("; "))}${X}\n`;
     case "injection.suspected":
-      return `${R}[injection suspected] page ${clean(String(p.seq))} score ${clean(String(p.score))}: ${clean((p.findings ?? []).map((f: { label?: string }) => String(f.label)).join("; "))}${X}\n`;
-    case "egress.blocked": return `${Y}[egress blocked${p.source === "browser" ? ": browser" : ""}] ${clean(String(p.host))} (${clean(String(p.reason ?? ""))})${X}\n`;
+      return `${R}[injection suspected] page ${clean(String(p.seq))} score ${clean(String(p.score))}: ${clean((p.findings ?? []).map((f: any) => String(f.label)).join("; "))}${X}\n`;
+    case "egress.blocked": return `${R}[egress blocked${p.source === "browser" ? ": browser" : ""}] ${clean(String(p.host))} (${clean(String(p.reason ?? ""))})${X}\n`;
     case "approval.requested": return `${Y}[approval needed] ${clean(String(p.summary))}${X}\n`;
     case "approval.granted": return `${G}[approved]${X}\n`;
     case "approval.denied": return `${R}[denied]${X}\n`;
@@ -43,26 +55,33 @@ export function TerminalView({ events }: { events: LedgerEvent[] }) {
   const el = useRef<HTMLDivElement>(null);
   const term = useRef<XTerm | null>(null);
   const done = useRef(0);
-  const seen = useRef(new Map<string, { n: number; label: string }>());
+  const seen = useRef(new Map<string, { n: number; label: string }>());   // repeated egress blocks
 
   useEffect(() => {
-    const t = new XTerm({ fontSize: 12, lineHeight: 1.55, letterSpacing: .15, convertEol: true,
-      disableStdin: true, scrollback: 5000, fontFamily: '"IBM Plex Mono", ui-monospace, monospace',
-      theme: { background: "#0b120e", foreground: "#d4e3d3", cursor: "#c7efaa", selectionBackground: "#435e43", black: "#0c1210", brightBlack: "#708775", red: "#ed968f", brightRed: "#f1b1ab", green: "#c7efaa", brightGreen: "#e2f6ca", yellow: "#ecc78f", brightYellow: "#f4d9aa", blue: "#91bac1", brightBlue: "#bdd9df", magenta: "#c9a9c3", brightMagenta: "#ebcbe2", cyan: "#9ed6c7", brightCyan: "#c5ece1", white: "#d8e4d7", brightWhite: "#f0f4e9" } });
+    const t = new XTerm({ fontSize: 14, lineHeight: 1.28, convertEol: true, disableStdin: true, scrollback: 5000,
+      fontFamily: FALLBACK_FONT, theme: THEME });
     const fit = new FitAddon();
     t.loadAddon(fit);
     t.open(el.current!);
     fit.fit();
     term.current = t; done.current = 0; seen.current.clear();
-    const ro = new ResizeObserver(() => { try { fit.fit(); } catch { /* hidden tab */ } });
+    const ro = new ResizeObserver(() => { try { fit.fit(); } catch { /* hidden tab: zero size */ } });
     ro.observe(el.current!);
-    return () => { ro.disconnect(); t.dispose(); term.current = null; };
+    // Computer Modern Typewriter loads lazily; switch to it once it is ready so the cell grid is measured with the real glyphs.
+    let alive = true;
+    document.fonts.load('500 14px "CMU Typewriter Text"').then(() => {
+      if (!alive) return;
+      t.options.fontFamily = CM_FONT;
+      try { fit.fit(); } catch { /* hidden tab */ }
+    }).catch(() => { /* keep the fallback face */ });
+    return () => { alive = false; ro.disconnect(); t.dispose(); term.current = null; };
   }, []);
 
   useEffect(() => {
     const t = term.current;
     if (!t) return;
-    if (events.length < done.current) { t.reset(); done.current = 0; seen.current.clear(); }
+    if (events.length < done.current) { t.reset(); done.current = 0; seen.current.clear(); }   // new task
+    // A page that loads 30 images from one blocked host is one red line plus a count, not 30 lines.
     const flush = () => {
       for (const v of seen.current.values()) {
         if (v.n) { t.write(`${D}  … ${v.n} more blocked request(s) → ${v.label}${X}\n`); v.n = 0; }
@@ -75,19 +94,35 @@ export function TerminalView({ events }: { events: LedgerEvent[] }) {
         const hit = seen.current.get(key);
         if (hit) { hit.n++; continue; }
         seen.current.set(key, { n: 0, label: `${clean(String(ev.payload.host))} (${clean(String(ev.payload.reason ?? ""))})` });
-      } else if (ev.type === "tool.result" || ev.type === "task.end") flush();
+      } else if (ev.type === "tool.result" || ev.type === "task.end") {
+        flush();
+      }
       const s = render(ev);
       if (s) t.write(s);
     }
   }, [events]);
 
-  return <div className="ml-terminal">
-    <div ref={el} className="ml-terminal-canvas" />
-    {events.length === 0 && <div className="ml-terminal-empty" aria-hidden="true">
-      <div className="ml-prompt-chevron">›_ <span style={{color: "#526d54"}}>minilocker / sandbox</span></div>
-      <strong>A clean slate, by design.</strong>
-      <p>Your agent's commands, outputs, and blocked actions will appear here. No simulated results. No hidden steps.</p>
-      <div className="ml-command-line">// awaiting first execution</div>
-    </div>}
-  </div>;
+  return (
+    <div className="relative flex h-full flex-col bg-term">
+      <div className="flex shrink-0 items-center gap-3 border-b border-white/10 bg-white/[.025] px-3.5 py-2.5 text-term-dim">
+        <span aria-hidden className="flex gap-1.5">
+          <i className="h-2.5 w-2.5 rounded-full bg-[#f0877b]/80" /><i className="h-2.5 w-2.5 rounded-full bg-[#e8c16d]/80" /><i className="h-2.5 w-2.5 rounded-full bg-[#8fd1a4]/80" />
+        </span>
+        <span className="font-mono text-[0.8rem]"><span className="text-[#62d7a1]">●</span> sandbox <span className="text-term-fg/60">·</span> /workspace</span>
+        <span className="ml-auto text-[0.8rem] italic tabular-nums">{events.length} ledger event{events.length === 1 ? "" : "s"}</span>
+      </div>
+      <div ref={el} className="min-h-0 flex-1 px-3 py-2" />
+      {events.length === 0 && (
+        <div className="pointer-events-none absolute inset-0 top-9 grid place-items-center p-8 text-center">
+          <div className="rise max-w-sm text-term-fg">
+            <div className="relative mx-auto mb-4 grid h-24 w-24 place-items-center"><span aria-hidden className="spin-center absolute inset-0 rounded-full border border-dashed border-white/20" style={{ animationDuration: "40s" }} /><Mark size={56} className="text-term-dim" /></div>
+            <div className="display text-[1.5rem]">Nothing has run yet</div>
+            <p className="mt-1 leading-relaxed text-term-dim">
+              Describe a task on the left. The agent works inside a sandbox, and everything it touches is measured and written to the ledger.
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }

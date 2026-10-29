@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { downloadArtifact, fetchArtifact } from "./api";
 import type { LedgerEvent } from "./api";
 import { savedFiles } from "./derive";
+import { Btn, Chip, Empty, Label } from "./ui";
 
 const TEXT = new Set(["txt", "md", "py", "js", "ts", "json", "csv", "tsv", "log", "yml", "yaml", "toml", "ini", "sh", "xml", "html", "css", "sql"]);
 const IMAGE = new Set(["png", "jpg", "jpeg", "gif", "webp"]);
@@ -44,69 +45,70 @@ export function FilesView({ taskId, events, running }: { taskId: string | null; 
 
   if (!taskId || (saved.files.length === 0 && saved.skipped.length === 0 && saved.failed === 0 && saved.screenshots === 0))
     return (
-      <div className="flex h-full items-center justify-center p-6 text-center text-sm text-zinc-500">
-        <div className="max-w-sm">
-          <div className="text-zinc-300">No saved files</div>
-          <p className="mt-2">{running
-            ? "Files the agent leaves in /workspace are saved when the task ends, so they outlive the sandbox."
-            : "Nothing was saved for this task: it produced no files, or no artifact store was attached (set MINILOCKER_S3_*; see deploy/dev-storage.sh)."}</p>
-        </div>
-      </div>
+      <Empty title="No saved files">
+        {running
+          ? "Files the agent leaves in /workspace are saved when the task ends, so they outlive the sandbox."
+          : "Nothing was saved for this task: it produced no files, or no artifact store was attached (set MINILOCKER_S3_*; see deploy/dev-storage.sh)."}
+      </Empty>
     );
 
   return (
-    <div className="flex h-full min-h-0">
-      <div className="flex w-72 shrink-0 flex-col border-r border-zinc-800">
-        <ul className="min-h-0 flex-1 overflow-auto p-2 text-xs">
-          {saved.files.length === 0 && <li className="p-2 text-zinc-500">No workspace files were saved.</li>}
+    <div className="flex h-full min-h-0 bg-sheet">
+      <div className="flex w-72 shrink-0 flex-col border-r border-rule bg-paper/40">
+        <div className="flex items-center gap-2 border-b border-rule px-3.5 py-2.5"><span aria-hidden className="h-3.5 w-[3px] rounded-full bg-accent" /><Label className="text-ink">Workspace files</Label><span className="ml-auto text-[0.8rem] tabular-nums text-ink-3">{saved.files.length}</span></div>
+        <ul className="min-h-0 flex-1 overflow-auto p-2">
+          {saved.files.length === 0 && <li className="p-2 italic text-ink-3">No workspace files were saved.</li>}
           {saved.files.map(f => (
             <li key={f.name}>
               <button onClick={() => { setName(f.name); setDlError(null); }} aria-pressed={f.name === name}
-                className={`flex w-full items-baseline gap-2 rounded px-2 py-1.5 text-left ${f.name === name ? "bg-zinc-800 text-zinc-100" : "text-zinc-300 hover:bg-zinc-900"}`}>
-                <span className="min-w-0 flex-1 truncate font-mono" title={f.name}>{f.name.replace(/^workspace\//, "")}</span>
-                <span className="shrink-0 text-zinc-500">{size(f.bytes)}</span>
+                className={`flex w-full items-baseline gap-2 rounded-[5px] px-2.5 py-1.5 text-left transition ${f.name === name ? "bg-accent font-bold text-on-accent" : "text-ink hover:bg-raised"}`}>
+                <span className="min-w-0 flex-1 truncate font-mono text-[0.84rem]" title={f.name}>{f.name.replace(/^workspace\//, "")}</span>
+                <span className={`shrink-0 text-[0.78rem] tabular-nums ${f.name === name ? "text-on-accent/80" : "text-ink-3"}`}>{size(f.bytes)}</span>
               </button>
             </li>
           ))}
         </ul>
-        <div className="border-t border-zinc-800 p-2 text-[11px] text-zinc-500">
+        <div className="space-y-0.5 border-t border-rule p-3 text-[0.8rem] italic leading-snug text-ink-2">
           {saved.screenshots > 0 && <div>{saved.screenshots} screenshot(s) are in the Browser tab.</div>}
-          {saved.skipped.length > 0 && <div className="text-amber-400" title={saved.skipped.map(s => `${s.name} (${s.reason})`).join("\n")}>
+          {saved.skipped.length > 0 && <div className="text-warn" title={saved.skipped.map(s => `${s.name} (${s.reason})`).join("\n")}>
             {saved.skipped.length} file(s) not saved: too large or over the limit.</div>}
-          {saved.failed > 0 && <div className="text-red-400">{saved.failed} save error(s): see the ledger.</div>}
-          <div>pkgs/, node_modules/, .git/ and caches are never saved.</div>
+          {saved.failed > 0 && <div className="text-bad">{saved.failed} save error(s): see the ledger.</div>}
+          <div className="text-ink-3">pkgs/, node_modules/, .git/ and caches are never saved.</div>
         </div>
       </div>
       <div className="flex min-w-0 flex-1 flex-col">
-        {!file ? <div className="m-auto text-sm text-zinc-500">Select a file to preview it.</div> : (
+        {!file ? <div className="m-auto italic text-ink-3">Select a file to preview it.</div> : (
           <>
-            <div className="flex items-center gap-3 border-b border-zinc-800 px-3 py-2 text-xs">
-              <span className="min-w-0 flex-1 truncate font-mono text-zinc-300" title={file.name}>{file.name}</span>
+            <div className="border-b border-rule bg-paper/40 px-4 py-2.5">
+              <div className="flex items-center gap-3">
+                <span className="min-w-0 flex-1 truncate font-mono text-[0.9rem] text-ink" title={file.name}>{file.name}</span>
+                <Btn size="sm" onClick={() => { setDlError(null); downloadArtifact(taskId, file.name).catch(e => setDlError((e as Error).message)); }}>Download</Btn>
+              </div>
               {preview && "sha" in preview && preview.sha && (
-                <span className={preview.sha === file.sha256 ? "text-emerald-400" : "text-red-400"}
-                  title={`sha256 ${file.sha256}`}>
-                  {preview.sha === file.sha256 ? "✓ matches ledger hash" : "✗ hash differs from ledger"} · {file.sha256.slice(0, 10)}…
-                </span>
+                <div className="mt-1.5 flex items-center gap-2">
+                  <Chip tone={preview.sha === file.sha256 ? "ok" : "bad"} title={`sha256 ${file.sha256}`}>
+                    {preview.sha === file.sha256 ? "✓ matches ledger hash" : "✗ hash differs from ledger"}
+                  </Chip>
+                  <span className="font-mono text-[0.76rem] text-ink-3" title={file.sha256}>sha256 {file.sha256.slice(0, 16)}…</span>
+                </div>
               )}
-              <button onClick={() => { setDlError(null); downloadArtifact(taskId, file.name).catch(e => setDlError((e as Error).message)); }}
-                className="rounded border border-zinc-700 px-2 py-0.5 text-zinc-200 hover:border-emerald-600">Download</button>
             </div>
-            {dlError && <div role="alert" className="border-b border-red-900 bg-red-950/50 px-3 py-1.5 text-xs text-red-300">{dlError}</div>}
-            <div className="min-h-0 flex-1 overflow-auto p-3">
-              {!preview || preview.state === "loading" ? <span className="text-xs text-zinc-500">loading…</span>
+            {dlError && <div role="alert" className="border-b border-bad/40 bg-bad-wash px-4 py-1.5 text-[0.88rem] text-bad">{dlError}</div>}
+            <div className="min-h-0 flex-1 overflow-auto p-4">
+              {!preview || preview.state === "loading" ? <span className="animate-pulse italic text-ink-3">loading…</span>
                 : preview.state === "error" ? (
-                  <div role="alert" className="text-xs text-red-400">
+                  <div role="alert" className="text-[0.92rem] text-bad">
                     {preview.message}
-                    {preview.message.startsWith("409") && <div className="mt-1 text-zinc-500">The stored bytes or the ledger failed verification, so nothing is shown.</div>}
-                    {preview.message.startsWith("503") && <div className="mt-1 text-zinc-500">No artifact store is attached to this control plane.</div>}
+                    {preview.message.startsWith("409") && <div className="mt-1 text-ink-2">The stored bytes or the ledger failed verification, so nothing is shown.</div>}
+                    {preview.message.startsWith("503") && <div className="mt-1 text-ink-2">No artifact store is attached to this control plane.</div>}
                   </div>)
-                : preview.state === "image" ? <img src={preview.url} alt={file.name} className="max-w-full bg-white" />
+                : preview.state === "image" ? <img src={preview.url} alt={file.name} className="max-w-full rounded-[5px] border border-rule bg-white" />
                 : preview.state === "text" ? (
                   <>
-                    <pre className="whitespace-pre-wrap break-all font-mono text-xs text-zinc-300">{preview.text}</pre>
-                    {preview.truncated && <div className="mt-2 text-xs text-zinc-500">Preview limited to the first {size(PREVIEW_BYTES)}. Download for the rest.</div>}
+                    <pre className="whitespace-pre-wrap break-all rounded-[5px] border border-rule bg-sunken p-3.5 font-mono text-[0.84rem] leading-relaxed text-ink">{preview.text}</pre>
+                    {preview.truncated && <div className="mt-2 text-[0.85rem] italic text-ink-2">Preview limited to the first {size(PREVIEW_BYTES)}. Download for the rest.</div>}
                   </>)
-                : <div className="text-xs text-zinc-500">No preview for this file type. Use Download.</div>}
+                : <div className="italic text-ink-2">No preview for this file type. Use Download.</div>}
             </div>
           </>
         )}
