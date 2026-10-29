@@ -44,7 +44,10 @@ function Workspace({ t }: { t: TaskApi }) {
         <StepStream events={t.events} />
       </section>
       <section className="flex min-h-0 flex-col">
-        <div role="tablist" className="flex shrink-0 items-center gap-1 px-4 pt-3">
+        <div
+          role="tablist"
+          className="flex shrink-0 items-center gap-1 px-4 pt-3"
+        >
           {(["terminal", "browser", "files"] as Tab[]).map((x) => (
             <button
               key={x}
@@ -99,18 +102,49 @@ function statusTone(status: string): Tint {
 }
 
 const Sun = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden>
-    <circle cx="12" cy="12" r="4" /><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8" />
+  <svg
+    width="16"
+    height="16"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+    strokeLinecap="round"
+    aria-hidden
+  >
+    <circle cx="12" cy="12" r="4" />
+    <path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8" />
   </svg>
 );
 const Moon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+  <svg
+    width="16"
+    height="16"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden
+  >
     <path d="M20.5 14.2A8.5 8.5 0 1 1 9.8 3.5a6.7 6.7 0 0 0 10.7 10.7Z" />
   </svg>
 );
 const Key = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-    <circle cx="8" cy="15" r="4" /><path d="M10.8 12.2 20 3M16 7l3 3M14 9l2 2" />
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden
+  >
+    <circle cx="8" cy="15" r="4" />
+    <path d="M10.8 12.2 20 3M16 7l3 3M14 9l2 2" />
   </svg>
 );
 
@@ -119,10 +153,16 @@ export default function App() {
   const [token, setTok] = useState(getToken());
   // The token is applied (screens refetch) when the field loses focus or Enter is pressed, not on every keystroke.
   const [applied, setApplied] = useState(getToken());
-  const [theme, setTheme] = useState<Theme>(() => (document.documentElement.dataset.theme === "light" ? "light" : "dark"));
+  const [theme, setTheme] = useState<Theme>(() =>
+    document.documentElement.dataset.theme === "dark" ? "dark" : "light",
+  );
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    try { localStorage.setItem("minilocker.theme", theme); } catch { /* private mode */ }
+    try {
+      localStorage.setItem("minilocker.theme", theme);
+    } catch {
+      /* private mode */
+    }
   }, [theme]);
   const t = useTask();
   const lab = useAttacks();
@@ -135,13 +175,20 @@ export default function App() {
     : t.running
       ? "running"
       : (t.end?.status ?? "done");
-  const apply = () => { const v = token.trim(); setToken(v); setTok(v); setApplied(v); };
+  const apply = () => {
+    const v = token.trim();
+    setToken(v);
+    setTok(v);
+    setApplied(v);
+  };
   return (
     <div className="flex h-full flex-col text-ink">
       <svg width="0" height="0" aria-hidden className="absolute">
         <defs>
           <linearGradient id="mlk-ok" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0" stopColor="var(--ok-a)" /><stop offset=".55" stopColor="var(--ok-b)" /><stop offset="1" stopColor="var(--ok-c)" />
+            <stop offset="0" stopColor="var(--ok-a)" />
+            <stop offset=".55" stopColor="var(--ok-b)" />
+            <stop offset="1" stopColor="var(--ok-c)" />
           </linearGradient>
         </defs>
       </svg>
@@ -152,8 +199,12 @@ export default function App() {
               <Mark size={30} />
             </span>
             <div className="leading-none">
-              <div className="display text-[1.55rem] text-ink">Mini<span className="text-accent-ink">Locker</span></div>
-              <div className="smcp mt-1 hidden text-[0.74rem] text-ink-3 xl:block">a blast-radius ledger for AI agents</div>
+              <div className="display text-[1.55rem] text-ink">
+                Mini<span className="text-accent-ink">Locker</span>
+              </div>
+              <div className="smcp mt-1 hidden text-[0.74rem] text-ink-3 xl:block">
+                a blast-radius ledger for AI agents
+              </div>
             </div>
           </div>
           <nav className="flex items-stretch gap-0.5" aria-label="Screens">
@@ -163,25 +214,49 @@ export default function App() {
                 onClick={() => setScreen(s.id)}
                 aria-current={screen === s.id ? "page" : undefined}
                 className={`relative flex items-center gap-1.5 whitespace-nowrap px-2.5 text-[1.04rem] transition xl:px-3.5 ${
-                  screen === s.id ? "font-bold text-ink" : "text-ink-2 hover:text-ink"
+                  screen === s.id
+                    ? "font-bold text-ink"
+                    : "text-ink-2 hover:text-ink"
                 }`}
               >
-                <span className={`text-[0.78rem] italic ${screen === s.id ? "text-accent-ink" : "text-ink-3"}`}>{i + 1}</span>
+                <span
+                  className={`text-[0.78rem] italic ${screen === s.id ? "text-accent-ink" : "text-ink-3"}`}
+                >
+                  {i + 1}
+                </span>
                 {s.label}
-                {screen === s.id && <span aria-hidden className="absolute inset-x-2 bottom-0 h-[3px] rounded-t-full bg-accent" style={{ boxShadow: "0 0 14px var(--accent)" }} />}
+                {screen === s.id && (
+                  <span
+                    aria-hidden
+                    className="absolute inset-x-2 bottom-0 h-[3px] rounded-t-full bg-accent"
+                    style={{ boxShadow: "0 0 14px var(--accent)" }}
+                  />
+                )}
               </button>
             ))}
           </nav>
           <div className="ml-auto flex items-center gap-2.5 py-2">
-            <Chip tone={statusTone(status)} title="Current task" dot={status !== "running"}>
+            <Chip
+              tone={statusTone(status)}
+              title="Current task"
+              dot={status !== "running"}
+            >
               {status === "running" && <Pulse tone="info" />}
-              {t.taskId && <span className="font-mono normal-case tracking-normal">{t.taskId}</span>}
+              {t.taskId && (
+                <span className="font-mono normal-case tracking-normal">
+                  {t.taskId}
+                </span>
+              )}
               {t.taskId && <span aria-hidden>·</span>}
               {status}
             </Chip>
             <button
               onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-              aria-label={theme === "dark" ? "Switch to the paper theme" : "Switch to the midnight theme"}
+              aria-label={
+                theme === "dark"
+                  ? "Switch to the paper theme"
+                  : "Switch to the midnight theme"
+              }
               title={theme === "dark" ? "Paper" : "Midnight"}
               className="grid h-8 w-8 place-items-center rounded-[5px] border border-rule bg-sheet text-ink-2 transition hover:border-accent hover:text-ink"
             >
@@ -202,11 +277,21 @@ export default function App() {
                   setTok(e.target.value);
                   setToken(e.target.value);
                 }}
-                onBlur={() => { if (token.trim() !== applied) apply(); }}
-                onKeyDown={(e) => { if (e.key === "Enter") apply(); }}
+                onBlur={() => {
+                  if (token.trim() !== applied) apply();
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") apply();
+                }}
                 className="w-20 bg-transparent text-[0.88rem] text-ink outline-none placeholder:text-ink-3 xl:w-24"
               />
-              {applied && <span aria-hidden title="Token set" className="h-1.5 w-1.5 rounded-full bg-ok" />}
+              {applied && (
+                <span
+                  aria-hidden
+                  title="Token set"
+                  className="h-1.5 w-1.5 rounded-full bg-ok"
+                />
+              )}
             </label>
           </div>
         </div>
@@ -240,7 +325,11 @@ export default function App() {
             }}
           />
         ) : screen === "timeline" ? (
-          <TimelineView taskId={t.taskId} events={t.events} running={t.running} />
+          <TimelineView
+            taskId={t.taskId}
+            events={t.events}
+            running={t.running}
+          />
         ) : (
           <InfraView active={screen === "infra"} />
         )}
